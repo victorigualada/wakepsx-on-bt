@@ -37,16 +37,15 @@ The integration impersonates your paired DualShock/DualSense controller using a 
 
 ## Installation
 
+Install the integration through **HACS**: **HACS → ⋮ → Custom repositories**, add `https://github.com/victorigualada/wakepsx-on-bt` as an **Integration**, download **Wake PSX on Bluetooth** and restart Home Assistant.
+
 ### ESPHome method
 
-1. Flash the ESP32 firmware — see [esphome/README.md](../../esphome/README.md).
-2. Copy the `wakepsx_on_bt` folder into your HA `custom_components` directory.
-3. Restart Home Assistant.
+Also flash the ESP32: add the package `github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@main` to your node config — see [esphome/README.md](../../esphome/README.md).
 
 ### Bluetooth Dongle method
 
-1. Copy the `wakepsx_on_bt` folder into your HA `custom_components` directory.
-2. Restart Home Assistant.
+Nothing else to install.
 
 Home Assistant automatically installs all required dependencies on restart. The Bluetooth layer is powered by [pywakepsx-on-bt](https://github.com/FreeTHX/pywakepsx-on-bt).
 

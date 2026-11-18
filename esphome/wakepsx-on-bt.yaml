@@ -1,0 +1,43 @@
+# ==============================================================================
+# Wake PSX on Bluetooth: ESPHome package
+#
+# Pull it straight from GitHub; nothing to download or copy:
+#
+#   packages:
+#     wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@main
+#
+# Requirements: classic ESP32 (WROOM/WROVER), ESP-IDF framework. S2/S3/C3/C6/H2
+# have no Bluetooth Classic and are rejected at validation time.
+# ==============================================================================
+esphome:
+  # The Home Assistant integration finds the node by this project name
+  # (device model "esp-wakepsx-on-bt"). Keep the part after the dot.
+  project:
+    name: "victorigualada.esp-wakepsx-on-bt"
+    version: "0.2.0"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://victorigualada/wakepsx-on-bt@main
+    components: [wakepsx_on_bt]
+
+# Brings up the Classic BT controller through Virtual HCI and sets the sdkconfig
+# options it needs. Creates the "PSX Wake Status" text sensor.
+wakepsx_on_bt:
+  id: wakepsx
+
+# Action called by the Home Assistant integration (esphome.<node>_wake_psx).
+api:
+  actions:
+    - action: wake_psx
+      variables:
+        dsx_mac: string # MAC of the controller paired with the console (spoofed)
+        psx_mac: string # MAC of the console to wake
+      then:
+        - wakepsx_on_bt.wake:
+            dsx_mac: !lambda return std::string(dsx_mac);
+            psx_mac: !lambda return std::string(psx_mac);

@@ -1,0 +1,54 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # Brand images live in home-assistant/brands, which this fork does not have.
+          ignore: brands
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  esphome:
+    name: ESPHome compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Point the package at this checkout
+        run: |
+          mkdir -p build
+          sed 's#source: github://victorigualada/wakepsx-on-bt@main#source: {type: local, path: ../components}#' \
+            esphome/wakepsx-on-bt.yaml > build/pkg.yaml
+          cat > build/ci.yaml <<'YAML'
+          esphome:
+            name: wakepsx-ci
+          packages:
+            wakepsx: !include pkg.yaml
+          logger:
+          api:
+          ota:
+            - platform: esphome
+          wifi:
+            ssid: ci
+            password: ci-password
+          YAML
+      - uses: esphome/build-action@v7
+        with:
+          yaml-file: build/ci.yaml

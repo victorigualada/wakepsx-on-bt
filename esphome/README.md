@@ -43,36 +43,79 @@ The wake protocol is identical across all PlayStation generations:
 
 ## Installation
 
-### 1. Adapt the YAML
+Nothing to download: the firmware is an [ESPHome external component](https://esphome.io/components/external_components.html) fetched from GitHub at compile time.
 
-The YAML uses an ESPHome [packages include](https://esphome.io/components/packages.html) to pull WiFi settings from a shared file:
+### Option A: the package (recommended)
+
+Add the package to your node config. It sets everything the Home Assistant integration expects:
 
 ```yaml
+esphome:
+  name: esp-wakepsx-on-bt
+  friendly_name: Wake PSX on Bluetooth
+
 packages:
-  wifi: !include ../../common/wifi.yaml
+  wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@main
+
+# plus your usual logger / api / ota / wifi
 ```
 
-Either adapt this path to point to your own shared WiFi config, or replace the entire `packages:` block with an inline `wifi:` section following the [ESPHome WiFi documentation](https://esphome.io/components/wifi.html):
+A complete node file with secrets is in [esp-wakepsx-on-bt.yaml](esp-wakepsx-on-bt.yaml). Pin `@main` to a tag if you want reproducible builds.
+
+The package provides:
+
+| Piece | Why |
+|---|---|
+| `esphome.project.name: victorigualada.esp-wakepsx-on-bt` | The integration finds the node by device model `esp-wakepsx-on-bt` |
+| `esp32: board: esp32dev`, ESP-IDF framework | Bluetooth Classic is only on the original ESP32 |
+| `external_components` + `wakepsx_on_bt:` | The wake firmware and its sdkconfig options |
+| `PSX Wake Status` text sensor | Status shown in HA (entity id ends in `psx_wake_status`) |
+| `api: actions: wake_psx` | Called by the integration as `esphome.<node>_wake_psx` |
+
+To use another classic ESP32 board, override it in your file (`esp32: board: ...`).
+
+### Option B: the component on its own
+
+If you want to wire it yourself (for example to wake from an ESPHome button or automation):
 
 ```yaml
-wifi:
-  ssid: "YourSSID"
-  password: "YourPassword"
+esphome:
+  project:
+    name: "victorigualada.esp-wakepsx-on-bt"   # keep it if you use the HA integration
+    version: "0.2.0"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://victorigualada/wakepsx-on-bt@main
+    components: [wakepsx_on_bt]
+
+wakepsx_on_bt:
+  id: wakepsx
+  status:                       # optional, any text_sensor option
+    name: "PSX Wake Status"
+
+button:
+  - platform: template
+    name: "Wake PS5"
+    on_press:
+      - wakepsx_on_bt.wake:
+          dsx_mac: "AA:BB:CC:DD:EE:FF"   # controller paired with the console
+          psx_mac: "11:22:33:44:55:66"   # console
 ```
 
-The node name (`esp-wakepsx-on-bt`) and friendly name (`Wake PSX on Bluetooth`) can also be changed in the `esphome:` section if you run multiple units.
+`wakepsx_on_bt.wake` accepts templates (`!lambda`) for both MACs. The component sets the Bluetooth sdkconfig options itself and refuses to build alongside `esp32_ble`, `esp32_ble_tracker` or `bluetooth_proxy`, which need the BLE host stack it disables.
 
-### 2. Flash the ESP32
+### Flash and add to Home Assistant
 
 ```bash
 esphome run esp-wakepsx-on-bt.yaml
 ```
 
-Or use the ESPHome dashboard in Home Assistant (add the file to your ESPHome config folder).
-
-### 3. Add to Home Assistant
-
-Once the ESP32 is online, Home Assistant will discover it automatically via the ESPHome integration. Add it, then configure the **Wake PSX on Bluetooth** integration and select this node as your wake gateway.
+Or use the ESPHome dashboard. Once the ESP32 is online, Home Assistant discovers it through the ESPHome integration. Add it, then configure the **Wake PSX on Bluetooth** integration and select this node as your wake gateway.
 
 ---
 
@@ -119,13 +162,13 @@ The status resets to `Ready` 5 seconds after the result is displayed.
 The firmware disables the full Bluetooth host stack (Bluedroid and NimBLE) and uses the **Virtual HCI (VHCI)** interface directly. This frees RAM and gives direct access to the HCI transport layer without a protocol stack in the way.
 
 ```
-ESPHome YAML lambda
+wakepsx_on_bt.wake action
         │
         ▼
-wakepsx_on_bt::wake_psx()     ← API entry point, mutex guard
+WakePsxOnBt::wake()           ← main loop: MAC parsing, busy guard, "Connecting..."
         │
         ▼
-FreeRTOS task: wake_task()    ← runs on APP_CPU, stack 4096 words (16 KB)
+FreeRTOS task: wake_task_()   ← 4 KB stack; posts results back to loop() for publishing
         │
         ├─ esp_bt_controller_deinit()     BT controller reset to clean state
         ├─ esp_iface_mac_addr_set()       BD_ADDR spoof (must happen before init)
@@ -154,7 +197,9 @@ Ref: Bluetooth Core Spec Vol 4 Part E §7.1.5.
 
 ### Concurrency
 
-A FreeRTOS mutex prevents concurrent wake attempts. A second call while a wake is in progress returns `Busy` immediately. The mutex is released 5 seconds after the result is published (while the status is displayed), so rapid retries within that window are also blocked.
+An atomic busy flag prevents concurrent wake attempts. A second call while a wake is in progress returns `Busy` immediately. The flag is cleared 5 seconds after the result is published (while the status is displayed), so rapid retries within that window are also blocked.
+
+The wake task never touches ESPHome entities: it hands each status to the component, and `loop()` publishes it from the main loop, because ESPHome entities and the API are not thread-safe.
 
 ### Timing Constants
 
@@ -168,12 +213,13 @@ A FreeRTOS mutex prevents concurrent wake attempts. A second call while a wake i
 
 ### sdkconfig Options
 
+The component sets these itself; you do not need them in your YAML.
+
 | Option | Value | Reason |
 |---|---|---|
 | `CONFIG_BT_ENABLED` | y | Enable BT subsystem |
-| `CONFIG_BT_CLASSIC_ENABLED` | y | Enable Classic BT (BR/EDR) |
 | `CONFIG_BT_CONTROLLER_ONLY` | y | No host stack — VHCI only |
 | `CONFIG_BT_BLUEDROID_ENABLED` | n | Disabled — not needed, saves RAM |
 | `CONFIG_BT_NIMBLE_ENABLED` | n | Disabled — not needed, saves RAM |
-| `CONFIG_BT_HCI_MODE_VHCI` | y | Route HCI over Virtual HCI interface |
+| `CONFIG_BTDM_CTRL_HCI_MODE_VHCI` | y | Route HCI over Virtual HCI interface |
 | `CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY` | y | Classic BT only — disables BLE hardware to save RAM |

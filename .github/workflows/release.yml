@@ -1,19 +1,20 @@
 name: Release
 
-# Run from Actions → Release → Run workflow, with the version (e.g. 0.2.1).
+# Runs on its own when a release is published on GitHub. Create the release from
+# the latest commit of main, with a tag like v1.2.3, and write the notes as usual.
 #
-# 1. Bumps the version on main (manifest, ESPHome project version, docs).
+# 1. Bumps the version on main to the tag's (manifest, ESPHome project version,
+#    pinned package examples in the docs).
 # 2. Adds a commit only the tag points to, where the ESPHome package pulls the
-#    external component from that same tag instead of main. Pinning the
-#    package (…/wakepsx-on-bt.yaml@vX.Y.Z) then pins the component too.
-# 3. Tags it and publishes the GitHub release (what HACS installs).
+#    external component from that same tag instead of main, and moves the tag
+#    there. Pinning the package (…/wakepsx-on-bt.yaml@vX.Y.Z) then pins the
+#    component too, and HACS installs the bumped version.
+#
+# The release itself (title, notes, assets) is left as published.
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version without the v (e.g. 0.2.1)"
-        required: true
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -21,28 +22,37 @@ permissions:
 concurrency: release
 
 jobs:
-  release:
+  pin:
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ inputs.version }}
-      TAG: v${{ inputs.version }}
-      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Check the version
+      - name: Check the tag
+        id: check
         run: |
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must look like 1.2.3, got '$VERSION'"; exit 1
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tags must look like v1.2.3, got '$TAG'"; exit 1
           fi
-          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-            echo "::error::Tag $TAG already exists"; exit 1
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if git show "$TAG:esphome/wakepsx-on-bt.yaml" | grep -qx "  wakepsx_ref: $TAG"; then
+            echo "$TAG already pins the component; nothing to do."
+            echo "done=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::$TAG does not point at the latest commit of main. Delete the release and the tag, and publish it again from main."
+            exit 1
           fi
 
       - name: Bump the version on main
+        if: steps.check.outputs.done != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -59,23 +69,21 @@ jobs:
           sed -i -E "s/^(    version: )\"[^\"]*\"/\1\"$VERSION\"/" esphome/wakepsx-on-bt.yaml esphome/README.md
           sed -i -E "s/(wakepsx-on-bt\.yaml@)v[0-9]+\.[0-9]+\.[0-9]+/\1$TAG/g" README.md esphome/README.md
 
-          git add -A custom_components esphome README.md
+          git add custom_components esphome README.md
           if git diff --cached --quiet; then
-            echo "Version already $VERSION on main"
+            echo "main is already at $VERSION"
           else
             git commit -m "Release $TAG"
             git push origin HEAD:main
           fi
 
-      - name: Pin the component to the tag
+      - name: Pin the component and move the tag
+        if: steps.check.outputs.done != 'true'
         run: |
           sed -i -E "s/^  wakepsx_ref: main$/  wakepsx_ref: $TAG/" esphome/wakepsx-on-bt.yaml
           grep -qx "  wakepsx_ref: $TAG" esphome/wakepsx-on-bt.yaml || {
             echo "::error::Could not set wakepsx_ref in esphome/wakepsx-on-bt.yaml"; exit 1
           }
           git commit -am "Pin the ESPHome component to $TAG"
-          git tag -a "$TAG" -m "$TAG"
-          git push origin "$TAG"
-
-      - name: Publish the release
-        run: gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --latest
+          git tag -fa "$TAG" -m "$TAG"
+          git push --force origin "refs/tags/$TAG"

@@ -52,7 +52,10 @@ class WakePsxOnBt : public Component {
 
   void publish_(WakeStatus status);
   // Called from the wake task: hand a status over to the main loop, which publishes it.
-  void post_status_(WakeStatus status) { this->pending_status_.store(static_cast<uint8_t>(status)); }
+  void post_status_(WakeStatus status) {
+    this->pending_status_.store(static_cast<uint8_t>(status));
+    this->enable_loop_soon_any_context();  // thread-safe; also wakes the main loop right away
+  }
 
   text_sensor::TextSensor *status_sensor_{nullptr};
   // Held from wake() until the result has been displayed; a second call meanwhile gets "Busy".

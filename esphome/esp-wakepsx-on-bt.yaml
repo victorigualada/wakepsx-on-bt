@@ -1,8 +1,8 @@
 # ==============================================================================
 # Wake PSX on Bluetooth: complete node configuration.
 #
-# Copy this file into your ESPHome config folder (or let the ESPHome dashboard
-# adopt the device), fill in secrets.yaml, and flash. Everything else comes from
+# Copy this file into your ESPHome config folder, make sure secrets.yaml has
+# api_encryption_key, wifi_ssid and wifi_password, and flash. Everything else comes from
 # the remote package below.
 # ==============================================================================
 substitutions:
@@ -16,10 +16,6 @@ esphome:
 packages:
   wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@main
 
-dashboard_import:
-  package_import_url: github://victorigualada/wakepsx-on-bt/esphome/esp-wakepsx-on-bt.yaml@main
-  import_full_config: false
-
 logger:
 
 api:
@@ -28,7 +24,6 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret ota_password
 
 wifi:
   ssid: !secret wifi_ssid

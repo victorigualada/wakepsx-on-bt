@@ -248,14 +248,14 @@ class PSXWakeButton(ButtonEntity):
             spoof_strategy=strategy,
         )
 
-    def _resolve_esphome_service_name(self) -> str:
+    def _resolve_esphome_service_name(self, use_cache: bool = True) -> str:
         """Return the ESPHome service name for this node.
 
         Uses the cached value from config entry when available. Falls back to
         device registry lookup, then suffix-stripping from entity_id.
         """
         cached = self._entry.data.get(CONF_ESP_SERVICE, "")
-        if cached:
+        if cached and use_cache:
             return cached
 
         ent_reg = er.async_get(self.hass)
@@ -287,13 +287,24 @@ class PSXWakeButton(ButtonEntity):
             return
 
         service_name = self._resolve_esphome_service_name()
+        available = [
+            s
+            for s in self.hass.services.async_services_for_domain(ESPHOME_DOMAIN)
+            if s.endswith(f"_{ESPHOME_WAKE_SERVICE}")
+        ]
 
         if not self.hass.services.has_service(ESPHOME_DOMAIN, service_name):
-            available = [
-                s
-                for s in self.hass.services.async_services_for_domain(ESPHOME_DOMAIN)
-                if ESPHOME_WAKE_SERVICE in s
-            ]
+            # The cached name goes stale when the node is renamed. Look it up again,
+            # and if there is exactly one wake action, that is the node.
+            fresh = self._resolve_esphome_service_name(use_cache=False)
+            if self.hass.services.has_service(ESPHOME_DOMAIN, fresh):
+                service_name = fresh
+            elif len(available) == 1:
+                service_name = available[0]
+            if service_name != self._entry.data.get(CONF_ESP_SERVICE, ""):
+                _LOGGER.info("Using ESPHome action %s.%s", ESPHOME_DOMAIN, service_name)
+
+        if not self.hass.services.has_service(ESPHOME_DOMAIN, service_name):
             _LOGGER.warning(
                 "ESPHome service '%s.%s' not found. Wake services available: %s",
                 ESPHOME_DOMAIN,
@@ -350,6 +361,8 @@ class PSXWakeButton(ButtonEntity):
     def _set_error_state(self) -> None:
         """Mark the last wake attempt as failed and schedule a status reset."""
         self._last_wake_result = "error"
+        self._last_wake_status_code = None
+        self._last_wake_status_text = "Error"
         self._last_wake_method = self._wake_method
         self.async_write_ha_state()
         self._schedule_status_reset()
@@ -361,6 +374,7 @@ class PSXWakeButton(ButtonEntity):
                 lock = _ADAPTER_LOCKS.setdefault(self._bt_adapter, asyncio.Lock())
                 if lock.locked():
                     self._last_wake_result = "error"
+                    self._last_wake_status_code = None
                     self._last_wake_status_text = "Busy"
                     self._last_wake_method = WAKE_METHOD_DONGLE
                     self.async_write_ha_state()
@@ -395,6 +409,16 @@ class PSXWakeButton(ButtonEntity):
                 await self._async_press_esphome()
                 # ESPHome status arrives asynchronously via _handle_esp_status_change
                 # and resets to "Ready" when the ESP firmware publishes it after 5 s.
+        except TimeoutError:
+            # pywakepsx-on-bt raises this when the console never answers the page
+            # (off and out of range, or a slow controller): a normal outcome, not a crash.
+            _LOGGER.debug("BT wake via %s: no response", self._bt_adapter)
+            self._last_wake_result = "timeout"
+            self._last_wake_status_code = None
+            self._last_wake_status_text = "No Response"
+            self._last_wake_method = self._wake_method
+            self.async_write_ha_state()
+            self._schedule_status_reset()
         except HomeAssistantError:
             self._set_error_state()
             raise

@@ -9,6 +9,14 @@
 # Requirements: classic ESP32 (WROOM/WROVER), ESP-IDF framework. S2/S3/C3/C6/H2
 # have no Bluetooth Classic and are rejected at validation time.
 # ==============================================================================
+substitutions:
+  # Git ref of the external component. Pin it together with the package, e.g.:
+  #   packages:
+  #     wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@v0.2.0
+  #   substitutions:
+  #     wakepsx_ref: v0.2.0
+  wakepsx_ref: main
+
 esphome:
   # The Home Assistant integration finds the node by this project name
   # (device model "esp-wakepsx-on-bt"). Keep the part after the dot.
@@ -22,7 +30,7 @@ esp32:
     type: esp-idf
 
 external_components:
-  - source: github://victorigualada/wakepsx-on-bt@main
+  - source: github://victorigualada/wakepsx-on-bt@${wakepsx_ref}
     components: [wakepsx_on_bt]
 
 # Brings up the Classic BT controller through Virtual HCI and sets the sdkconfig

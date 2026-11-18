@@ -60,7 +60,16 @@ packages:
 # plus your usual logger / api / ota / wifi
 ```
 
-A complete node file with secrets is in [esp-wakepsx-on-bt.yaml](esp-wakepsx-on-bt.yaml). Pin `@main` to a tag if you want reproducible builds.
+A complete node file with secrets is in [esp-wakepsx-on-bt.yaml](esp-wakepsx-on-bt.yaml).
+
+`@main` follows the latest code. For reproducible builds pin both the package and the component it pulls to the same tag:
+
+```yaml
+packages:
+  wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@v0.2.0
+substitutions:
+  wakepsx_ref: v0.2.0
+```
 
 The package provides:
 

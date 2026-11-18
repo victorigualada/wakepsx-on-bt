@@ -66,7 +66,8 @@
       "adapter_not_found": "L'adaptateur Bluetooth sélectionné n'a pas été détecté sur ce système.",
       "detection_error": "Impossible de détecter la stratégie de l'adaptateur. Vérifiez que l'adaptateur est connecté et que Home Assistant a accès aux périphériques Bluetooth.",
       "no_esphome_found": "Aucun nœud ESPHome compatible trouvé. Vérifiez qu'un nœud avec le firmware WakePSX est en ligne et accessible depuis Home Assistant.",
-      "no_adapter_found": "Aucun adaptateur Bluetooth détecté sur ce système. Veuillez connecter un dongle Bluetooth USB et réessayer."
+      "no_adapter_found": "Aucun adaptateur Bluetooth détecté sur ce système. Veuillez connecter un dongle Bluetooth USB et réessayer.",
+      "adapter_unsupported": "Impossible de changer l'adresse Bluetooth de cet adaptateur : son chipset n'est pas pris en charge, ou Home Assistant n'a pas pu l'identifier (vérifiez son accès au Bluetooth brut). Utilisez un chipset compatible (voir pywakepsx-on-bt) ou la méthode ESPHome."
     },
     "abort": {
       "already_configured": "Cette console est déjà configurée.",
@@ -134,7 +135,8 @@
       "adapter_not_found": "L'adaptateur Bluetooth sélectionné n'a pas été détecté sur ce système.",
       "detection_error": "Impossible de détecter la stratégie de l'adaptateur. Vérifiez que l'adaptateur est connecté et que Home Assistant a accès aux périphériques Bluetooth.",
       "no_esphome_found": "Aucun nœud ESPHome compatible trouvé. Vérifiez qu'un nœud avec le firmware WakePSX est en ligne et accessible depuis Home Assistant.",
-      "no_adapter_found": "Aucun adaptateur Bluetooth détecté sur ce système. Veuillez connecter un dongle Bluetooth USB et réessayer."
+      "no_adapter_found": "Aucun adaptateur Bluetooth détecté sur ce système. Veuillez connecter un dongle Bluetooth USB et réessayer.",
+      "adapter_unsupported": "Impossible de changer l'adresse Bluetooth de cet adaptateur : son chipset n'est pas pris en charge, ou Home Assistant n'a pas pu l'identifier (vérifiez son accès au Bluetooth brut). Utilisez un chipset compatible (voir pywakepsx-on-bt) ou la méthode ESPHome."
     }
   }
 }

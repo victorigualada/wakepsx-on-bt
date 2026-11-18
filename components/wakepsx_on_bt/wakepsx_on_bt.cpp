@@ -130,10 +130,13 @@ static uint8_t hex_nibble(char c) {
   return static_cast<uint8_t>(c - 'A' + 10);
 }
 
-// Parses "AA:BB:CC:DD:EE:FF". Rejects all-zeros, broadcast and multicast addresses, which are
+// Parses "AA:BB:CC:DD:EE:FF" (or with '-' separators, case-insensitive). Rejects all-zeros, broadcast and multicast addresses, which are
 // never valid BR/EDR unicast targets, before any BT hardware is touched.
 static bool parse_mac(const std::string &mac, uint8_t out[6]) {
   if (mac.size() != 17)
+    return false;
+  const char sep = mac[2];
+  if (sep != ':' && sep != '-')
     return false;
 
   for (int i = 0; i < 6; i++) {
@@ -142,7 +145,7 @@ static bool parse_mac(const std::string &mac, uint8_t out[6]) {
     const unsigned char lo = static_cast<unsigned char>(mac[pos + 1]);
     if (!std::isxdigit(hi) || !std::isxdigit(lo))
       return false;
-    if (i < 5 && mac[pos + 2] != ':')
+    if (i < 5 && mac[pos + 2] != sep)
       return false;
     out[i] = static_cast<uint8_t>((hex_nibble(static_cast<char>(hi)) << 4) | hex_nibble(static_cast<char>(lo)));
   }
@@ -171,10 +174,14 @@ struct WakePsxOnBt::TaskParams {
 
 void WakePsxOnBt::setup() { this->publish_(WakeStatus::READY); }
 
+// Only runs while the wake task has something to publish: post_status_() re-enables it.
 void WakePsxOnBt::loop() {
   const auto pending = static_cast<WakeStatus>(this->pending_status_.exchange(static_cast<uint8_t>(WakeStatus::NONE)));
-  if (pending != WakeStatus::NONE)
+  if (pending != WakeStatus::NONE) {
     this->publish_(pending);
+  } else {
+    this->disable_loop();
+  }
 }
 
 void WakePsxOnBt::dump_config() {
@@ -229,6 +236,7 @@ void WakePsxOnBt::wake_task_(void *arg) {
   auto finish = [params, self](WakeStatus result) {
     self->post_status_(result);
     cleanup_bt_controller();
+    ESP_LOGD(TAG, "Wake task stack headroom: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     vTaskDelay(pdMS_TO_TICKS(WAKE_RESULT_DISPLAY_MS));
     self->post_status_(WakeStatus::READY);
     self->busy_ = false;

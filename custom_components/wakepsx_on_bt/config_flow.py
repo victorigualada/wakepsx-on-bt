@@ -53,6 +53,7 @@ from pywakepsx_on_bt.const import (
     KEY_PSX_MAC,
 )
 from pywakepsx_on_bt.strategies import detect_strategy, list_compatible_adapters
+from pywakepsx_on_bt.spoof import UnsupportedSpoofStrategy
 from pywakepsx_on_bt.strategies.csr import CsrSpoofStrategy
 from pywakepsx_on_bt.usb import extract_psx_bt_macs
 
@@ -557,21 +558,24 @@ class PSXWakeBTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.exception("Strategy detection failed for %s", bt_adapter)
                     errors["base"] = "detection_error"
                 else:
-                    self._pending_bt_strategy = type(strategy).__name__
-                    if isinstance(strategy, CsrSpoofStrategy):
-                        return await self.async_step_select_csr_write_mode()
-                    return self._finalize_config_entry(
-                        {
-                            CONF_PSX_MAC: self._psx_mac,
-                            CONF_DSX_MAC: self._dsx_mac,
-                            CONF_CONTROLLER_TYPE: self._controller_type,
-                            CONF_CONSOLE_NAME: self._console_name,
-                            CONF_WAKE_METHOD: WAKE_METHOD_DONGLE,
-                            CONF_BT_ADAPTER: bt_adapter,
-                            CONF_BT_STRATEGY: self._pending_bt_strategy,
-                            CONF_ESP_ENTITY: "",
-                        }
-                    )
+                    if isinstance(strategy, UnsupportedSpoofStrategy):
+                        errors["base"] = "adapter_unsupported"
+                    else:
+                        self._pending_bt_strategy = type(strategy).__name__
+                        if isinstance(strategy, CsrSpoofStrategy):
+                            return await self.async_step_select_csr_write_mode()
+                        return self._finalize_config_entry(
+                            {
+                                CONF_PSX_MAC: self._psx_mac,
+                                CONF_DSX_MAC: self._dsx_mac,
+                                CONF_CONTROLLER_TYPE: self._controller_type,
+                                CONF_CONSOLE_NAME: self._console_name,
+                                CONF_WAKE_METHOD: WAKE_METHOD_DONGLE,
+                                CONF_BT_ADAPTER: bt_adapter,
+                                CONF_BT_STRATEGY: self._pending_bt_strategy,
+                                CONF_ESP_ENTITY: "",
+                            }
+                        )
 
         if available_compatible:
             default = next(iter(clean)) if clean else next(iter(available_compatible))
@@ -839,19 +843,22 @@ class PSXWakeBTOptionsFlowHandler(config_entries.OptionsFlow):
                     _LOGGER.exception("Strategy detection failed for %s", adapter)
                     errors["base"] = "detection_error"
                 else:
-                    self._pending_bt_strategy = type(strategy).__name__
-                    if isinstance(strategy, CsrSpoofStrategy):
-                        return await self.async_step_init_csr_write_mode()
-                    new_data = dict(self.config_entry.data)
-                    new_data[CONF_WAKE_METHOD] = WAKE_METHOD_DONGLE
-                    new_data[CONF_BT_ADAPTER] = adapter
-                    new_data[CONF_BT_STRATEGY] = self._pending_bt_strategy
-                    new_data[CONF_ESP_ENTITY] = ""
-                    new_data.pop(CONF_CSR_WRITE_MODE, None)
-                    self.hass.config_entries.async_update_entry(
-                        self.config_entry, data=new_data
-                    )
-                    return self.async_create_entry(title="", data={})
+                    if isinstance(strategy, UnsupportedSpoofStrategy):
+                        errors["base"] = "adapter_unsupported"
+                    else:
+                        self._pending_bt_strategy = type(strategy).__name__
+                        if isinstance(strategy, CsrSpoofStrategy):
+                            return await self.async_step_init_csr_write_mode()
+                        new_data = dict(self.config_entry.data)
+                        new_data[CONF_WAKE_METHOD] = WAKE_METHOD_DONGLE
+                        new_data[CONF_BT_ADAPTER] = adapter
+                        new_data[CONF_BT_STRATEGY] = self._pending_bt_strategy
+                        new_data[CONF_ESP_ENTITY] = ""
+                        new_data.pop(CONF_CSR_WRITE_MODE, None)
+                        self.hass.config_entries.async_update_entry(
+                            self.config_entry, data=new_data
+                        )
+                        return self.async_create_entry(title="", data={})
 
         current_adapter = self.config_entry.data.get(
             CONF_BT_ADAPTER, DEFAULT_BT_ADAPTER

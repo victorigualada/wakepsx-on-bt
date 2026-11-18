@@ -66,7 +66,8 @@
       "adapter_not_found": "The selected Bluetooth adapter was not detected on this system.",
       "detection_error": "Failed to detect the adapter strategy. Check that the adapter is connected and that Home Assistant has access to Bluetooth devices.",
       "no_esphome_found": "No compatible ESPHome node found. Make sure a node running the WakePSX firmware is online and reachable from Home Assistant.",
-      "no_adapter_found": "No Bluetooth adapter detected on this system. Please connect a USB Bluetooth dongle and try again."
+      "no_adapter_found": "No Bluetooth adapter detected on this system. Please connect a USB Bluetooth dongle and try again.",
+      "adapter_unsupported": "This adapter's Bluetooth address cannot be changed: its chipset is not supported, or Home Assistant could not identify it (check it has access to raw Bluetooth). Use a supported chipset (see pywakepsx-on-bt) or the ESPHome method."
     },
     "abort": {
       "already_configured": "This console is already configured.",
@@ -126,6 +127,16 @@
           "csr_write_mode": "CSR Write Mode"
         }
       }
+    },
+    "error": {
+      "invalid_wake_method": "Invalid wake method selected.",
+      "invalid_adapter": "Invalid Bluetooth adapter format. Use hciX (example: hci0).",
+      "adapter_already_configured": "The selected Bluetooth adapter is already configured for another console.",
+      "adapter_not_found": "The selected Bluetooth adapter was not detected on this system.",
+      "detection_error": "Failed to detect the adapter strategy. Check that the adapter is connected and that Home Assistant has access to Bluetooth devices.",
+      "no_esphome_found": "No compatible ESPHome node found. Make sure a node running the WakePSX firmware is online and reachable from Home Assistant.",
+      "no_adapter_found": "No Bluetooth adapter detected on this system. Please connect a USB Bluetooth dongle and try again.",
+      "adapter_unsupported": "This adapter's Bluetooth address cannot be changed: its chipset is not supported, or Home Assistant could not identify it (check it has access to raw Bluetooth). Use a supported chipset (see pywakepsx-on-bt) or the ESPHome method."
     }
   }
 }

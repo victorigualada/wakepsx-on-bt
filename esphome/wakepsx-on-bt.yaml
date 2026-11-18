@@ -10,11 +10,10 @@
 # have no Bluetooth Classic and are rejected at validation time.
 # ==============================================================================
 substitutions:
-  # Git ref of the external component. Pin it together with the package, e.g.:
-  #   packages:
-  #     wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@v0.2.0
-  #   substitutions:
-  #     wakepsx_ref: v0.2.0
+  # Git ref the external component is pulled from. "main" here; in a release
+  # tag the release workflow sets it to that same tag, so pinning the package
+  # (…/wakepsx-on-bt.yaml@vX.Y.Z) also pins the component. Override it only to
+  # mix versions on purpose.
   wakepsx_ref: main
 
 esphome:

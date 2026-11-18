@@ -1,0 +1,81 @@
+name: Release
+
+# Run from Actions → Release → Run workflow, with the version (e.g. 0.2.1).
+#
+# 1. Bumps the version on main (manifest, ESPHome project version, docs).
+# 2. Adds a commit only the tag points to, where the ESPHome package pulls the
+#    external component from that same tag instead of main. Pinning the
+#    package (…/wakepsx-on-bt.yaml@vX.Y.Z) then pins the component too.
+# 3. Tags it and publishes the GitHub release (what HACS installs).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v (e.g. 0.2.1)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      TAG: v${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check the version
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must look like 1.2.3, got '$VERSION'"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists"; exit 1
+          fi
+
+      - name: Bump the version on main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          python3 - <<'PY'
+          import json, os
+          path = "custom_components/wakepsx_on_bt/manifest.json"
+          manifest = json.load(open(path))
+          manifest["version"] = os.environ["VERSION"]
+          with open(path, "w") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          PY
+          sed -i -E "s/^(    version: )\"[^\"]*\"/\1\"$VERSION\"/" esphome/wakepsx-on-bt.yaml esphome/README.md
+          sed -i -E "s/(wakepsx-on-bt\.yaml@)v[0-9]+\.[0-9]+\.[0-9]+/\1$TAG/g" README.md esphome/README.md
+
+          git add -A custom_components esphome README.md
+          if git diff --cached --quiet; then
+            echo "Version already $VERSION on main"
+          else
+            git commit -m "Release $TAG"
+            git push origin HEAD:main
+          fi
+
+      - name: Pin the component to the tag
+        run: |
+          sed -i -E "s/^  wakepsx_ref: main$/  wakepsx_ref: $TAG/" esphome/wakepsx-on-bt.yaml
+          grep -qx "  wakepsx_ref: $TAG" esphome/wakepsx-on-bt.yaml || {
+            echo "::error::Could not set wakepsx_ref in esphome/wakepsx-on-bt.yaml"; exit 1
+          }
+          git commit -am "Pin the ESPHome component to $TAG"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+      - name: Publish the release
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --latest

@@ -14,7 +14,7 @@ substitutions:
   # tag the release workflow sets it to that same tag, so pinning the package
   # (…/wakepsx-on-bt.yaml@vX.Y.Z) also pins the component. Override it only to
   # mix versions on purpose.
-  wakepsx_ref: main
+  wakepsx_ref: v0.2.1
 
 esphome:
   # The Home Assistant integration finds the node by this project name

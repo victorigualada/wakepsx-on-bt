@@ -61,6 +61,14 @@ _WAKE_STATUS_RESET_DELAY: int = 5
 
 _ESP_TIMEOUT_STATES: frozenset[str] = frozenset({"Page Timeout", "No Response"})
 
+# How long after its own press a button keeps listening to the ESPHome status
+# sensor. Firmware worst case: ~0.3 s setup + 6 s page timeout + 5 s result
+# display before "Ready". Several consoles can share one ESP32, so outside this
+# window the sensor reflects another console's wake and is ignored.
+_ESP_WAKE_WINDOW: int = 20
+# Sensor states meaning the ESP32 is free to start a wake.
+_ESP_IDLE_STATES: frozenset[str] = frozenset({"Ready", "unknown", "unavailable"})
+
 # Per-adapter asyncio locks. Prevents concurrent HCI operations (BD_ADDR spoof +
 # wake sequence) when two console entries share the same Bluetooth dongle.
 _ADAPTER_LOCKS: dict[str, asyncio.Lock] = {}
@@ -93,6 +101,8 @@ class PSXWakeButton(ButtonEntity):
         self._last_wake_status_text: str = "Ready"
         self._last_wake_method: str = ""
         self._reset_timer_cancel: Callable[[], None] | None = None
+        # Set while a wake started by this button is running on the ESP32.
+        self._esp_window_cancel: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------
     # Config helpers — always read from entry.data so options-flow
@@ -153,10 +163,14 @@ class PSXWakeButton(ButtonEntity):
                 )
             )
         self.async_on_remove(self._cancel_reset_timer)
+        self.async_on_remove(self._end_esp_window)
 
     @callback
     def _handle_esp_status_change(self, event: Event) -> None:
         """Mirror ESPHome status sensor into button attributes."""
+        if self._esp_window_cancel is None:
+            # Not our wake: another console sharing this ESP32.
+            return
         new_state: State | None = event.data.get("new_state")
         if new_state is None or new_state.state in ("unknown", "unavailable"):
             return
@@ -177,6 +191,32 @@ class PSXWakeButton(ButtonEntity):
         self._last_wake_status_code = None
         self._last_wake_status_text = state_str
         self.async_write_ha_state()
+        if state_str == "Ready":
+            self._end_esp_window()
+        elif state_str == "Busy":
+            # The ESP32 refused our call; what follows belongs to the wake it is running.
+            self._end_esp_window()
+            self._schedule_status_reset()
+
+    @callback
+    def _start_esp_window(self) -> None:
+        """Start listening to the status sensor for this button's wake."""
+        self._end_esp_window()
+
+        @callback
+        def _expire(_now) -> None:
+            self._esp_window_cancel = None
+
+        self._esp_window_cancel = async_call_later(
+            self.hass, _ESP_WAKE_WINDOW, _expire
+        )
+
+    @callback
+    def _end_esp_window(self) -> None:
+        """Stop listening to the status sensor."""
+        if self._esp_window_cancel is not None:
+            self._esp_window_cancel()
+            self._esp_window_cancel = None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -323,12 +363,31 @@ class PSXWakeButton(ButtonEntity):
             self._psx_mac,
             self._dsx_mac,
         )
-        await self.hass.services.async_call(
-            ESPHOME_DOMAIN,
-            service_name,
-            {CONF_PSX_MAC: self._psx_mac, CONF_DSX_MAC: self._dsx_mac},
-            blocking=True,
-        )
+        current = self.hass.states.get(self._esp_entity_id)
+        if current is not None and current.state not in _ESP_IDLE_STATES:
+            # The ESP32 is waking (or showing the result for) another console. It
+            # would answer "Busy", but then this button could not tell that wake's
+            # result from its own, so report Busy here without calling it.
+            self._last_wake_method = WAKE_METHOD_ESPHOME
+            self._last_wake_result = "error"
+            self._last_wake_status_code = None
+            self._last_wake_status_text = "Busy"
+            self.async_write_ha_state()
+            self._schedule_status_reset()
+            return
+
+        # Open the window before calling: "Connecting..." can arrive before the call returns.
+        self._start_esp_window()
+        try:
+            await self.hass.services.async_call(
+                ESPHOME_DOMAIN,
+                service_name,
+                {CONF_PSX_MAC: self._psx_mac, CONF_DSX_MAC: self._dsx_mac},
+                blocking=True,
+            )
+        except Exception:
+            self._end_esp_window()
+            raise
 
     @callback
     def _cancel_reset_timer(self) -> None:

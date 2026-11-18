@@ -60,6 +60,8 @@ from pywakepsx_on_bt.usb import extract_psx_bt_macs
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from homeassistant.helpers.service_info.usb import UsbServiceInfo
+
 _LOGGER = logging.getLogger(__name__)
 _ADAPTER_PATTERN = re.compile(r"^hci\d+$")
 
@@ -336,6 +338,59 @@ class PSXWakeBTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({}),
             errors=errors,
             description_placeholders={"status": status},
+        )
+
+    async def async_step_usb(
+        self, discovery_info: UsbServiceInfo
+    ) -> config_entries.FlowResult:
+        """Handle a PlayStation controller plugged in over USB.
+
+        HA's default USB step aborts as soon as any entry exists, so the controller
+        of a second console was never discovered. Read the MACs right away instead
+        and key the discovery by console: nothing for consoles already set up, and
+        ignoring one console's discovery does not hide the others.
+        """
+        try:
+            controllers = await self.hass.async_add_executor_job(extract_psx_bt_macs)
+        except Exception:
+            _LOGGER.debug("USB discovery: could not read the controller", exc_info=True)
+            return self.async_abort(reason="extraction_error")
+
+        known = {
+            e.unique_id
+            for e in self._async_current_entries(include_ignore=True)
+            if e.unique_id
+        }
+        ctrl = next(
+            (c for c in controllers if c[KEY_PSX_MAC].lower() not in known), None
+        )
+        if ctrl is None:
+            return self.async_abort(reason="already_configured")
+
+        self._psx_mac = ctrl[KEY_PSX_MAC]
+        self._dsx_mac = ctrl[KEY_DSX_MAC]
+        self._controller_type = ctrl.get(KEY_CTRL_TYPE, DEFAULT_CONTROLLER_NAME)
+        self._console_name = CONTROLLER_TO_CONSOLE.get(
+            self._controller_type, DEFAULT_CONSOLE_NAME
+        )
+        await self.async_set_unique_id(self._psx_mac.lower())
+        self._abort_if_unique_id_configured()
+        self.context["title_placeholders"] = {"name": self._console_name}
+        return await self.async_step_usb_confirm()
+
+    async def async_step_usb_confirm(
+        self, user_input: Mapping[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Confirm setting up the console whose controller was discovered."""
+        if user_input is not None:
+            return await self.async_step_select_wake_method()
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="usb_confirm",
+            description_placeholders={
+                "console_name": self._console_name,
+                "controller": self._controller_type,
+            },
         )
 
     async def async_step_select_controller(

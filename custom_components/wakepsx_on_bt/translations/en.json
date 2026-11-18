@@ -55,6 +55,10 @@
         "data": {
           "csr_write_mode": "CSR Write Mode"
         }
+      },
+      "usb_confirm": {
+        "title": "Wake PSX on Bluetooth",
+        "description": "A {controller} paired with a **{console_name}** was plugged in over USB. Set up waking this console?"
       }
     },
     "error": {
@@ -72,8 +76,10 @@
     "abort": {
       "already_configured": "This console is already configured.",
       "extraction_error": "An internal error occurred during configuration. Please restart the setup.",
-      "reconfigure_successful": "The console configuration has been updated successfully."
-    }
+      "reconfigure_successful": "The console configuration has been updated successfully.",
+      "already_in_progress": "Setup for this console is already in progress."
+    },
+    "flow_title": "{name}"
   },
   "selector": {
     "wake_method": {

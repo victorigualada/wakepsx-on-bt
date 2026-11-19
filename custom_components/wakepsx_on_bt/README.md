@@ -4,6 +4,8 @@
 
 Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 
+> **Optional.** An ESP32 flashed with the [ESPHome package](../../esphome/README.md) already has its own **Wake console** button; read the MACs with the [MAC reader](https://victorigualada.github.io/wakepsx-on-bt/) and you don't need this integration. Use it to read the MACs from a controller plugged into the HA host, or to wake from the host's own Bluetooth adapter when there is no ESP32.
+
 The integration impersonates your paired DualShock/DualSense controller using a low-level Bluetooth HCI wake packet. Two wake methods are supported:
 
 | Method | Description | Recommended |

@@ -11,12 +11,22 @@ Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 
 | Component | Description | Documentation |
 |---|---|---|
-| **HA integration** (HACS) | Button entity, config flow, wake logic | [custom_components/wakepsx_on_bt/](custom_components/wakepsx_on_bt/README.md) |
-| **ESPHome external component** | ESP32 gateway for reliable Bluetooth wake (recommended method) | [esphome/](esphome/README.md) |
+| **ESPHome external component** | ESP32 that wakes the console. Brings its own **Wake console** button, MAC fields and status sensor; works on its own. | [esphome/](esphome/README.md) |
+| **MAC reader** | Web page that reads the controller and console MACs from a controller plugged in over USB | [victorigualada.github.io/wakepsx-on-bt](https://victorigualada.github.io/wakepsx-on-bt/) |
+| **HA integration** (HACS, optional) | Reads the MACs from a controller plugged into the HA host, and can wake from the host's own Bluetooth adapter when there is no ESP32 | [custom_components/wakepsx_on_bt/](custom_components/wakepsx_on_bt/README.md) |
+
+## With an ESP32 only (recommended)
+
+1. **Flash the ESP32** with the package below (classic ESP32 only: WROOM-32/WROVER, `esp32dev`).
+2. **Read the MACs**: plug the controller paired with the console into a computer over USB and open the [MAC reader](https://victorigualada.github.io/wakepsx-on-bt/) in Chrome or Edge.
+3. **Paste them** into **Controller MAC** and **Console MAC** on the ESP32's device page in Home Assistant (or set the `controller_mac` / `console_mac` substitutions in the node's YAML).
+4. Press **Wake console**. It is a normal button entity: use it in dashboards, scripts and automations.
+
+No integration to install. The rest of this page covers the optional integration.
+
+## 1. Install the integration with HACS (optional)
 
 The integration relies on **[pywakepsx-on-bt](https://github.com/FreeTHX/pywakepsx-on-bt)**, a Python library for HCI-level Bluetooth operations and MAC extraction from USB controllers. Home Assistant installs it automatically.
-
-## 1. Install the integration with HACS
 
 [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=victorigualada&repository=wakepsx-on-bt&category=integration)
 
@@ -45,11 +55,11 @@ wifi:
   password: !secret wifi_password
 ```
 
-The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
+The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the **Wake console** button, the **Controller MAC** / **Console MAC** fields, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
 
 ## 3. Add the integration
 
-**Settings → Devices & Services → Add Integration → Wake PSX on Bluetooth**, then follow the config flow (connect your controller via USB when prompted and pick the ESPHome node).
+**Settings → Devices & Services → Add Integration → Wake PSX on Bluetooth**, then follow the config flow (connect your controller via USB when prompted and pick the ESPHome node). Every wake the integration sends through the ESP32 also stores the MACs in the node's **Controller MAC** / **Console MAC** fields, so the node's own **Wake console** button works too, and keeps working if you remove the integration later.
 
 ## Releasing
 

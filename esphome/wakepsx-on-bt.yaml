@@ -15,6 +15,11 @@ substitutions:
   # (…/wakepsx-on-bt.yaml@vX.Y.Z) also pins the component. Override it only to
   # mix versions on purpose.
   wakepsx_ref: main
+  # MACs the "Wake console" button uses on the first boot. Leave them empty and
+  # set them from the device page in Home Assistant instead (Controller MAC /
+  # Console MAC); after that the values saved on the ESP32 win over these.
+  controller_mac: ""
+  console_mac: ""
 
 esphome:
   # The Home Assistant integration finds the node by this project name
@@ -37,7 +42,48 @@ external_components:
 wakepsx_on_bt:
   id: wakepsx
 
+# The two MACs the ESP32 needs, editable from the device page in Home Assistant
+# and saved in flash. Read them with the page linked in the README (controller
+# over USB, Chrome or Edge), or let the integration fill them in: every wake it
+# sends through this node stores the MACs it used here.
+text:
+  - platform: template
+    id: wakepsx_controller_mac
+    name: "Controller MAC"
+    icon: mdi:controller
+    entity_category: config
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "${controller_mac}"
+    max_length: 17
+    pattern: "^$|^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"
+  - platform: template
+    id: wakepsx_console_mac
+    name: "Console MAC"
+    icon: mdi:sony-playstation
+    entity_category: config
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "${console_mac}"
+    max_length: 17
+    pattern: "^$|^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"
+
+# Wakes the console with the MACs above. Missing or malformed MACs show up as
+# "Invalid MAC" on the status sensor.
+button:
+  - platform: template
+    id: wakepsx_wake_button
+    name: "Wake console"
+    icon: mdi:power
+    on_press:
+      - wakepsx_on_bt.wake:
+          dsx_mac: !lambda return id(wakepsx_controller_mac).state;
+          psx_mac: !lambda return id(wakepsx_console_mac).state;
+
 # Action called by the Home Assistant integration (esphome.<node>_wake_psx).
+# Optional: the button above works without the integration.
 api:
   actions:
     - action: wake_psx
@@ -45,6 +91,12 @@ api:
         dsx_mac: string # MAC of the controller paired with the console (spoofed)
         psx_mac: string # MAC of the console to wake
       then:
+        - text.set:
+            id: wakepsx_controller_mac
+            value: !lambda return std::string(dsx_mac);
+        - text.set:
+            id: wakepsx_console_mac
+            value: !lambda return std::string(psx_mac);
         - wakepsx_on_bt.wake:
             dsx_mac: !lambda return std::string(dsx_mac);
             psx_mac: !lambda return std::string(psx_mac);

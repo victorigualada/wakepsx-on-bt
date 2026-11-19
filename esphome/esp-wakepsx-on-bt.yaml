@@ -8,6 +8,11 @@
 substitutions:
   name: esp-wakepsx-on-bt
   friendly_name: Wake PSX on Bluetooth
+  # Optional: MACs for the "Wake console" button on the first boot. You can also
+  # set them later from the device page in Home Assistant. Read them with
+  # https://victorigualada.github.io/wakepsx-on-bt/
+  # controller_mac: "AA:BB:CC:DD:EE:FF"
+  # console_mac: "11:22:33:44:55:66"
 
 esphome:
   name: ${name}

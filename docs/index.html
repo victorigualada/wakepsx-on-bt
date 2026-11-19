@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read controller MACs</title>
+<meta name="description" content="Read the Bluetooth MACs of a PlayStation controller and its console over USB, for Wake PSX on Bluetooth.">
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --text: #1b1f24; --muted: #5b6570;
+    --border: #d9dee4; --accent: #0b5cd5; --accent-text: #ffffff;
+    --error: #b42318; --ok: #1a7f37; --code: #eef1f4;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --surface: #1a1e24; --text: #e6e9ed; --muted: #9aa4af;
+      --border: #2e353e; --accent: #4c8dff; --accent-text: #0b0e12;
+      --error: #ff7b72; --ok: #56d364; --code: #232931;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 40rem; margin: 0 auto; padding: 2.5rem 1rem 4rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+  p, li { color: var(--muted); }
+  ol { padding-left: 1.25rem; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+          border-radius: 10px; padding: 1.25rem; margin-top: 1.5rem; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; }
+  .primary { background: var(--accent); color: var(--accent-text); border: 0;
+             padding: .7rem 1.2rem; font-weight: 600; }
+  .primary:disabled { opacity: .5; cursor: not-allowed; }
+  .copy { background: transparent; color: var(--accent); border: 1px solid var(--border);
+          padding: .3rem .7rem; font-size: .875rem; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+         padding: .75rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .row:first-child { border-top: 0; }
+  .label { font-size: .875rem; color: var(--muted); }
+  .mac { font: 600 1.15rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+  pre { background: var(--code); border-radius: 8px; padding: .9rem; overflow-x: auto;
+        font: .875rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); margin: 0; }
+  .msg { margin-top: 1rem; }
+  .msg.error { color: var(--error); }
+  .msg.ok { color: var(--ok); }
+  [hidden] { display: none !important; }
+  a { color: var(--accent); }
+  small { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Read your controller's MACs</h1>
+  <p>Wake PSX on Bluetooth wakes the console by impersonating a controller already paired with it, so it needs two
+     addresses: the controller's and the console's. Both are stored in the controller. This page reads them over USB.</p>
+  <ol>
+    <li>Connect the controller to this computer with a USB <strong>data</strong> cable.</li>
+    <li>Press <strong>Read controller</strong> and pick it in the browser's list.</li>
+    <li>Paste the two MACs into <strong>Controller MAC</strong> and <strong>Console MAC</strong> on the ESP32's
+        device page in Home Assistant.</li>
+  </ol>
+  <p><small>Needs Chrome, Edge or another Chromium browser (WebHID). Nothing leaves this page.
+     Supports DualSense, DualSense Edge and DualShock 4; DualShock 3 is best effort.</small></p>
+
+  <div class="card">
+    <button class="primary" id="read">Read controller</button>
+    <p class="msg" id="msg" role="status" aria-live="polite"></p>
+
+    <div id="result" hidden>
+      <div class="row">
+        <div><div class="label">Controller MAC</div><div class="mac" id="dsx"></div></div>
+        <button class="copy" data-copy="dsx">Copy</button>
+      </div>
+      <div class="row">
+        <div><div class="label">Console MAC</div><div class="mac" id="psx"></div></div>
+        <button class="copy" data-copy="psx">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="yaml-card" hidden>
+    <p style="margin-top:0">Or set them in the node's YAML; they are used on the first boot:</p>
+    <pre id="yaml"></pre>
+    <p style="margin-bottom:0"><button class="copy" data-copy="yaml">Copy YAML</button></p>
+  </div>
+
+  <p style="margin-top:2rem"><small><a href="https://github.com/victorigualada/wakepsx-on-bt">victorigualada/wakepsx-on-bt</a></small></p>
+</main>
+
+<script>
+  const SONY = 0x054c;
+  // productId -> how to read it. Offsets match pywakepsx_on_bt/usb.py, where
+  // byte 0 of each feature report is the report ID.
+  const DS4 = { name: "DualShock 4", reports: [{ id: 0x12, len: 16, dsx: [1, 7, true], psx: [10, 16, true] }] };
+  const DUALSENSE = { name: "DualSense", reports: [{ id: 0x09, len: 20, dsx: [1, 7, true], psx: [10, 16, true] }] };
+  const CONTROLLERS = {
+    0x0268: { name: "DualShock 3", reports: [
+      { id: 0xf2, len: 17, dsx: [4, 10, false] },
+      { id: 0xf5, len: 8, psx: [2, 8, false] },
+    ] },
+    0x05c4: DS4,
+    0x09cc: DS4,
+    0x0ce6: DUALSENSE,
+    0x0df2: { ...DUALSENSE, name: "DualSense Edge" },
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const say = (text, kind = "") => { $("msg").textContent = text; $("msg").className = "msg " + kind; };
+
+  if (!("hid" in navigator)) {
+    $("read").disabled = true;
+    say("This browser has no WebHID. Open the page in Chrome or Edge on a computer.", "error");
+  }
+
+  // Chrome returns feature reports with the report ID as byte 0; tolerate a
+  // browser that strips it by shifting the offsets.
+  function readMac(bytes, report, [start, end, reversed]) {
+    const shift = bytes.length >= report.len && bytes[0] === report.id ? 0 : -1;
+    const raw = Array.from(bytes.slice(start + shift, end + shift));
+    if (raw.length !== 6) throw new Error("short report 0x" + report.id.toString(16));
+    if (reversed) raw.reverse();
+    return raw.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(":");
+  }
+
+  async function read() {
+    say("");
+    $("result").hidden = true;
+    $("yaml-card").hidden = true;
+    let device;
+    try {
+      [device] = await navigator.hid.requestDevice({
+        filters: Object.keys(CONTROLLERS).map((pid) => ({ vendorId: SONY, productId: Number(pid) })),
+      });
+    } catch (e) {
+      say("Could not open the device picker: " + e.message, "error");
+      return;
+    }
+    if (!device) { say("No controller selected."); return; }
+
+    const kind = CONTROLLERS[device.productId];
+    try {
+      if (!device.opened) await device.open();
+      const macs = {};
+      for (const report of kind.reports) {
+        const view = await device.receiveFeatureReport(report.id);
+        const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+        if (report.dsx) macs.dsx = readMac(bytes, report, report.dsx);
+        if (report.psx) macs.psx = readMac(bytes, report, report.psx);
+      }
+      show(kind.name, macs);
+    } catch (e) {
+      say(`Could not read the ${kind.name}: ${e.message}. Use a USB cable (not Bluetooth), ` +
+          "close other apps using the controller (Steam, DS4Windows) and try again.", "error");
+    } finally {
+      try { await device.close(); } catch {}
+    }
+  }
+
+  function show(name, { dsx, psx }) {
+    $("dsx").textContent = dsx;
+    $("psx").textContent = psx;
+    $("result").hidden = false;
+    $("yaml").textContent = `substitutions:\n  controller_mac: "${dsx}"\n  console_mac: "${psx}"`;
+    $("yaml-card").hidden = false;
+    if (/^(00:){5}00$|^(FF:){5}FF$/.test(psx)) {
+      say(`${name} read, but it is not paired with any console. Pair it with the console once and read it again.`, "error");
+    } else {
+      say(`${name} read.`, "ok");
+    }
+  }
+
+  $("read").addEventListener("click", read);
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($(btn.dataset.copy).textContent);
+        const old = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => (btn.textContent = old), 1500);
+      } catch { say("Copy failed; select the text and copy it by hand.", "error"); }
+    });
+  });
+</script>
+</body>
+</html>

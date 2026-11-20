@@ -79,6 +79,7 @@ The package provides:
 | `external_components` + `wakepsx_on_bt:` | The wake firmware and its sdkconfig options |
 | `PSX Wake Status` text sensor | Status shown in HA (entity id ends in `psx_wake_status`) |
 | **Wake console** button | Wakes the console with the two MACs below |
+| **Console IP** text field | Where the state sensors ask the console, saved on the ESP32 |
 | **Console state** / **Console power** (+ **Console name**, **Console firmware**) | Whether the console is on, in rest mode or off, asked over the local network (see [Console state](#console-state)) |
 | **Controller MAC** / **Console MAC** text fields | The MACs the button uses, editable from HA and saved on the ESP32 |
 | `api: actions: wake_psx` | Called by the integration as `esphome.<node>_wake_psx`; also stores the MACs it receives in the two fields |
@@ -152,30 +153,28 @@ Or use the ESPHome dashboard. Once the ESP32 is online, Home Assistant discovers
 
 The package also asks the console every 10 seconds whether it is on, over the local network, the same way the PS Remote Play app finds consoles (DDP: a UDP message to port 9302 on a PS5, 987 on a PS4). The console answers right away, even in rest mode; no PSN account or registration is involved, and the Bluetooth side is never touched, so checking never wakes the console.
 
+Set the console's IP in **Console IP** on the ESP32's device page in Home Assistant (Configuration section), and give the console a fixed IP on your router (DHCP reservation). It is saved on the ESP32. Or set it in the node's YAML, used on the first boot only:
+
+```yaml
+substitutions:
+  console_ip: "192.168.1.105"
+```
+
 | Entity | Values |
 |---|---|
-| **Console state** | `On`, `Rest` (rest mode) or `Off` (no reply for two checks in a row: off, unplugged or not on the network) |
+| **Console state** | `On`, `Rest` (rest mode), `Off` (no reply for two checks in a row: off, unplugged or not on the network) or `No IP` (Console IP empty or invalid) |
 | **Console power** | `on` only when the state is `On` |
 | **Console name** | The console's name, e.g. `PS5-338` (diagnostic) |
 | **Console firmware** | System software version, e.g. `14.23` (diagnostic) |
 
-The console does not report the game it is running over DDP; for that use Home Assistant's [PlayStation Network](https://www.home-assistant.io/integrations/playstation_network/) integration.
+The ESP32 always asks the console at its IP, never by broadcast: with Bluetooth on, WiFi stays in power-save mode, and the console's replies to a broadcast never reach the ESP32. The console does not report the game it is running over DDP; for that use Home Assistant's [PlayStation Network](https://www.home-assistant.io/integrations/playstation_network/) integration.
 
-By default the ESP32 broadcasts and takes the first console that answers. With more than one console on the network, or if broadcasts don't reach it, point it at one:
-
-```yaml
-substitutions:
-  console_ip: "192.168.1.105"        # the console's IP (give it a DHCP reservation)
-  # console_host_id: "D4F7D543E740"  # or its DDP host id, which the logs show
-```
-
-With the standalone component, add a `console:` block (all keys optional):
+With the standalone component, add a `console:` block. `address` takes an IP or a lambda (read at every check):
 
 ```yaml
 wakepsx_on_bt:
   console:
-    address: 192.168.1.105   # omit to broadcast
-    host_id: D4F7D543E740    # only accept this console
+    address: 192.168.1.105   # or: !lambda return id(my_text).state;
     update_interval: 10s
     state:
       name: "Console state"

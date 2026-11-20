@@ -37,28 +37,20 @@ const char *console_state_to_string(ConsoleState state) {
       return "Rest";
     case ConsoleState::OFF:
       return "Off";
+    case ConsoleState::NO_ADDRESS:
+      return "No IP";
     default:
       return "Unknown";
   }
 }
 
 void ConsoleMonitor::setup() {
-  if (this->address_.empty()) {
-    this->dest_addr_ = htonl(INADDR_BROADCAST);
-  } else if (inet_pton(AF_INET, this->address_.c_str(), &this->dest_addr_) != 1) {
-    ESP_LOGE(TAG, "Invalid console address '%s'", this->address_.c_str());
-    this->mark_failed();
-    return;
-  }
-
   this->fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (this->fd_ < 0) {
     ESP_LOGE(TAG, "Could not create the UDP socket (errno %d)", errno);
     this->mark_failed();
     return;
   }
-  int enable = 1;
-  setsockopt(this->fd_, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(enable));
   fcntl(this->fd_, F_SETFL, fcntl(this->fd_, F_GETFL, 0) | O_NONBLOCK);
 
   // Any local port: the console replies to the port the probe came from.
@@ -74,9 +66,42 @@ void ConsoleMonitor::setup() {
   }
 }
 
+// Reads the address (it may come from a text entity) and re-parses it when it changed.
+bool ConsoleMonitor::resolve_address_() {
+  std::string address = this->address_.value();
+  if (address == this->current_address_ && !address.empty())
+    return this->address_valid_;
+
+  const bool changed = address != this->current_address_;
+  this->current_address_ = std::move(address);
+  this->address_valid_ = !this->current_address_.empty() &&
+                         inet_pton(AF_INET, this->current_address_.c_str(), &this->dest_addr_) == 1 &&
+                         this->dest_addr_ != htonl(INADDR_BROADCAST) && this->dest_addr_ != htonl(INADDR_ANY);
+  if (changed) {
+    this->probe_pending_ = false;
+    this->misses_ = 0;
+    if (this->address_valid_) {
+      ESP_LOGI(TAG, "Asking the console at %s", this->current_address_.c_str());
+    } else if (!this->current_address_.empty()) {
+      ESP_LOGW(TAG, "Invalid console IP '%s'", this->current_address_.c_str());
+    } else {
+      ESP_LOGW(TAG, "No console IP set");
+    }
+  }
+  return this->address_valid_;
+}
+
 void ConsoleMonitor::update() {
-  if (this->fd_ < 0 || !network::is_connected())
+  if (this->fd_ < 0)
     return;
+  if (!this->resolve_address_()) {
+    this->set_state_(ConsoleState::NO_ADDRESS);
+    return;
+  }
+  if (!network::is_connected())
+    return;
+  if (this->state_ == ConsoleState::NO_ADDRESS)
+    this->state_ = ConsoleState::UNKNOWN;  // new address: no verdict until it answers or misses
 
   if (this->probe_pending_ && this->misses_ < MISSES_BEFORE_OFF && ++this->misses_ >= MISSES_BEFORE_OFF)
     this->set_state_(ConsoleState::OFF);
@@ -120,7 +145,7 @@ void ConsoleMonitor::handle_reply_(char *data, size_t len) {
   } else if (strncmp(data, "HTTP/1.1 620", 12) == 0) {
     state = ConsoleState::REST;
   } else {
-    return;  // our own broadcast looped back, or something else on the port
+    return;  // not a DDP reply
   }
 
   std::string host_id, host_name, system_version;
@@ -173,7 +198,7 @@ void ConsoleMonitor::set_state_(ConsoleState state) {
   this->state_ = state;
   if (this->state_sensor_ != nullptr)
     this->state_sensor_->publish_state(console_state_to_string(state));
-  if (this->power_sensor_ != nullptr)
+  if (this->power_sensor_ != nullptr && state != ConsoleState::UNKNOWN)
     this->power_sensor_->publish_state(state == ConsoleState::ON);
 }
 
@@ -186,7 +211,7 @@ void ConsoleMonitor::publish_if_changed_(text_sensor::TextSensor *sensor, const 
 
 void ConsoleMonitor::dump_config() {
   ESP_LOGCONFIG(TAG, "Console monitor (DDP):");
-  ESP_LOGCONFIG(TAG, "  Address: %s", this->address_.empty() ? "broadcast" : this->address_.c_str());
+  ESP_LOGCONFIG(TAG, "  Address: %s", this->current_address_.empty() ? "(not set yet)" : this->current_address_.c_str());
   if (!this->host_id_.empty())
     ESP_LOGCONFIG(TAG, "  Host ID: %s", this->host_id_.c_str());
   LOG_UPDATE_INTERVAL(this);

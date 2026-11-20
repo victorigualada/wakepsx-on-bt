@@ -5,7 +5,7 @@ console and sends a raw HCI Create Connection through the controller's Virtual
 HCI interface. No Bluetooth host stack (Bluedroid/NimBLE) is used.
 
 Optionally (`console:`), it also reports whether the console is on, in rest mode
-or off, asking it over the local network with DDP.
+or off, asking it at its IP over the local network with DDP.
 """
 
 import esphome.codegen as cg
@@ -55,7 +55,8 @@ ConsoleMonitor = wakepsx_on_bt_ns.class_("ConsoleMonitor", cg.PollingComponent)
 
 
 def _console_address(value):
-    """An IPv4 address, or empty to broadcast (lets the package default to "")."""
+    """An IPv4 address. Empty is accepted (the state then reads "No IP") so the package can
+    default to "" and take the address from its Console IP text entity instead."""
     value = cv.string_strict(value).strip()
     if not value:
         return ""
@@ -75,7 +76,7 @@ def _host_id(value):
 CONSOLE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(ConsoleMonitor),
-        cv.Optional(CONF_ADDRESS, default=""): _console_address,
+        cv.Optional(CONF_ADDRESS, default=""): cv.templatable(_console_address),
         cv.Optional(CONF_HOST_ID, default=""): _host_id,
         cv.Optional(CONF_STATE, default={"name": "Console state"}): text_sensor.text_sensor_schema(
             icon="mdi:sony-playstation",
@@ -151,7 +152,8 @@ async def to_code(config):
 async def _console_to_code(config):
     mon = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(mon, config)
-    cg.add(mon.set_address(config[CONF_ADDRESS]))
+    address = await cg.templatable(config[CONF_ADDRESS], [], cg.std_string)
+    cg.add(mon.set_address(address))
     if config[CONF_HOST_ID]:
         cg.add(mon.set_host_id(config[CONF_HOST_ID]))
 

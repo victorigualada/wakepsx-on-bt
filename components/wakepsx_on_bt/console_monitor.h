@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -17,6 +18,7 @@ enum class ConsoleState : uint8_t {
   ON,           // "HTTP/1.1 200 Ok"
   REST,         // "HTTP/1.1 620 Server Standby"
   OFF,          // no reply: off, unplugged or not on the network
+  NO_ADDRESS,   // no valid console IP configured: nothing is asked
 };
 
 const char *console_state_to_string(ConsoleState state);
@@ -24,6 +26,10 @@ const char *console_state_to_string(ConsoleState state);
 // Asks the console over the local network whether it is on, in rest mode or off, the same way
 // the PS Remote Play app finds consoles: a UDP "SRCH" to port 9302 (PS5) and 987 (PS4), which
 // the console answers right away, even in rest mode. No account or registration needed.
+//
+// Always unicast to the console's IP. Broadcast is not used: Bluetooth forces WiFi power save on,
+// and in practice the console's replies to broadcast probes never reach the ESP32, while replies
+// to unicast ones do (the unicast probe's ARP request already teaches the console our address).
 class ConsoleMonitor : public PollingComponent {
  public:
   void setup() override;
@@ -32,8 +38,9 @@ class ConsoleMonitor : public PollingComponent {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
-  /// Console IPv4 address; empty broadcasts on the local network.
-  void set_address(const std::string &address) { this->address_ = address; }
+  /// Console IPv4 address, constant or lambda (read at every update, so it can come from a text
+  /// entity). Empty or invalid: the state reads "No IP" and nothing is sent.
+  template<typename V> void set_address(V address) { this->address_ = address; }
   /// Only accept replies from this console (DDP host-id, 12 hex digits, no separators).
   void set_host_id(const std::string &host_id) { this->host_id_ = host_id; }
 
@@ -47,7 +54,11 @@ class ConsoleMonitor : public PollingComponent {
   void set_state_(ConsoleState state);
   static void publish_if_changed_(text_sensor::TextSensor *sensor, const std::string &value);
 
-  std::string address_;
+  bool resolve_address_();
+
+  TemplatableValue<std::string> address_;
+  std::string current_address_;  // last address read, to notice changes
+  bool address_valid_{false};
   std::string host_id_;
   uint32_t dest_addr_{0};  // network byte order
   int fd_{-1};

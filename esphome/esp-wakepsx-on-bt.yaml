@@ -13,7 +13,8 @@ substitutions:
   # https://victorigualada.github.io/wakepsx-on-bt/
   # controller_mac: "AA:BB:CC:DD:EE:FF"
   # console_mac: "11:22:33:44:55:66"
-  # Optional: the console's IP for the Console state sensors (default: broadcast).
+  # Optional: the console's IP for the Console state sensors. You can also set
+  # it later from the device page (Console IP).
   # console_ip: "192.168.1.105"
 
 esphome:

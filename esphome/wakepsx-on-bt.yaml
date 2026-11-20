@@ -20,11 +20,10 @@ substitutions:
   # Console MAC); after that the values saved on the ESP32 win over these.
   controller_mac: ""
   console_mac: ""
-  # Console state over the local network (DDP). Empty broadcasts and takes the
-  # first console that answers; set the console's IP (or its DDP host id) when
-  # there is more than one on the network.
+  # Console IP for the Console state sensors on the first boot. Leave it empty
+  # and set it from the device page (Console IP) instead; after that the value
+  # saved on the ESP32 wins. Give the console a fixed IP (DHCP reservation).
   console_ip: ""
-  console_host_id: ""
 
 esphome:
   # The Home Assistant integration finds the node by this project name
@@ -47,10 +46,9 @@ external_components:
 wakepsx_on_bt:
   id: wakepsx
   # Asks the console every 10 s whether it is on, in rest mode or off (UDP to
-  # port 9302/987, like the PS Remote Play app). No account needed.
+  # port 9302/987 at its IP, like the PS Remote Play app). No account needed.
   console:
-    address: "${console_ip}"
-    host_id: "${console_host_id}"
+    address: !lambda return id(wakepsx_console_ip).state;
     state:
       name: "Console state"
     power:
@@ -87,6 +85,18 @@ text:
     initial_value: "${console_mac}"
     max_length: 17
     pattern: "^$|^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"
+  # Where the Console state sensors ask. Empty: they read "No IP".
+  - platform: template
+    id: wakepsx_console_ip
+    name: "Console IP"
+    icon: mdi:ip-network
+    entity_category: config
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "${console_ip}"
+    max_length: 15
+    pattern: "^$|^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
 
 # Wakes the console with the MACs above. Missing or malformed MACs show up as
 # "Invalid MAC" on the status sensor.

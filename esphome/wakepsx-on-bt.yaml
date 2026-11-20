@@ -20,6 +20,11 @@ substitutions:
   # Console MAC); after that the values saved on the ESP32 win over these.
   controller_mac: ""
   console_mac: ""
+  # Console state over the local network (DDP). Empty broadcasts and takes the
+  # first console that answers; set the console's IP (or its DDP host id) when
+  # there is more than one on the network.
+  console_ip: ""
+  console_host_id: ""
 
 esphome:
   # The Home Assistant integration finds the node by this project name
@@ -41,6 +46,19 @@ external_components:
 # options it needs. Creates the "PSX Wake Status" text sensor.
 wakepsx_on_bt:
   id: wakepsx
+  # Asks the console every 10 s whether it is on, in rest mode or off (UDP to
+  # port 9302/987, like the PS Remote Play app). No account needed.
+  console:
+    address: "${console_ip}"
+    host_id: "${console_host_id}"
+    state:
+      name: "Console state"
+    power:
+      name: "Console power"
+    host_name:
+      name: "Console name"
+    system_version:
+      name: "Console firmware"
 
 # The two MACs the ESP32 needs, editable from the device page in Home Assistant
 # and saved in flash. Read them with the page linked in the README (controller

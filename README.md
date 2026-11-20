@@ -11,7 +11,7 @@ Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 
 | Component | Description | Documentation |
 |---|---|---|
-| **ESPHome external component** | ESP32 that wakes the console. Brings its own **Wake console** button, MAC fields and status sensor; works on its own. | [esphome/](esphome/README.md) |
+| **ESPHome external component** | ESP32 that wakes the console and reports whether it is on, in rest mode or off. Brings its own **Wake console** button, MAC fields and sensors; works on its own. | [esphome/](esphome/README.md) |
 | **MAC reader** | Web page that reads the controller and console MACs from a controller plugged in over USB | [victorigualada.github.io/wakepsx-on-bt](https://victorigualada.github.io/wakepsx-on-bt/) |
 | **HA integration** (HACS, optional) | Reads the MACs from a controller plugged into the HA host, and can wake from the host's own Bluetooth adapter when there is no ESP32 | [custom_components/wakepsx_on_bt/](custom_components/wakepsx_on_bt/README.md) |
 
@@ -21,6 +21,8 @@ Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 2. **Read the MACs**: plug the controller paired with the console into a computer over USB and open the [MAC reader](https://victorigualada.github.io/wakepsx-on-bt/) in Chrome or Edge.
 3. **Paste them** into **Controller MAC** and **Console MAC** on the ESP32's device page in Home Assistant (or set the `controller_mac` / `console_mac` substitutions in the node's YAML).
 4. Press **Wake console**. It is a normal button entity: use it in dashboards, scripts and automations.
+
+The node also shows **Console state** (`On` / `Rest` / `Off`) and **Console power**, asked over the local network ([details](esphome/README.md#console-state)).
 
 No integration to install. The rest of this page covers the optional integration.
 
@@ -55,7 +57,7 @@ wifi:
   password: !secret wifi_password
 ```
 
-The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the **Wake console** button, the **Controller MAC** / **Console MAC** fields, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
+The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the **Wake console** button, the **Controller MAC** / **Console MAC** fields, the **Console state** sensors, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
 
 ## 3. Add the integration
 

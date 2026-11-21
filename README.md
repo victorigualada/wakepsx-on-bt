@@ -22,7 +22,7 @@ Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 3. **Paste them** into **Controller MAC** and **Console MAC** on the ESP32's device page in Home Assistant (or set the `controller_mac` / `console_mac` substitutions in the node's YAML).
 4. Press **Wake console**. It is a normal button entity: use it in dashboards, scripts and automations.
 
-Set **Console IP** on the same page (give the console a fixed IP on your router) and the node also shows **Console state** (`On` / `Rest` / `Off`) and **Console power**, asked over the local network ([details](esphome/README.md#console-state)).
+Set **Console IP** on the same page (give the console a fixed IP on your router) and the node also shows **Console state** (`On` / `Rest` / `Off`) and **Console power**, asked over the local network ([details](esphome/README.md#console-state)). Set **Remote Play IP** to the device you play from (an Apple TV with Asobi, a phone with PS Remote Play) and the ESP32 wakes the console as soon as you open Remote Play there ([details](esphome/README.md#remote-play-request)).
 
 No integration to install. The rest of this page covers the optional integration.
 
@@ -57,7 +57,7 @@ wifi:
   password: !secret wifi_password
 ```
 
-The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the **Wake console** button, the **Controller MAC** / **Console MAC** fields, the **Console state** sensors, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
+The package brings the external component, the `esp32dev` board with ESP-IDF, the Bluetooth sdkconfig options, the **Wake console** button, the **Controller MAC** / **Console MAC** fields, the **Console state** sensors, the **Remote Play request** sensor and its switch, the `PSX Wake Status` sensor and the `wake_psx` action that the integration calls. A ready-to-use node file is in [esphome/esp-wakepsx-on-bt.yaml](esphome/esp-wakepsx-on-bt.yaml). Details and the standalone component reference: [esphome/README.md](esphome/README.md).
 
 ## 3. Add the integration
 

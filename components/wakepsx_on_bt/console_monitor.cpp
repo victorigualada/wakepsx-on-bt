@@ -1,14 +1,18 @@
 // Console state over DDP (PlayStation Device Discovery Protocol).
 
 #include "console_monitor.h"
+#include "arp_watch.h"
 
+#include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/components/network/util.h"
 
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cinttypes>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -25,6 +29,16 @@ static const char PS4_SEARCH[] = "SRCH * HTTP/1.1\ndevice-discovery-protocol-ver
 // Unanswered probes in a row before the console counts as off. One lost UDP packet on WiFi
 // should not flip the state.
 static constexpr uint8_t MISSES_BEFORE_OFF = 2;
+
+// Parses a dotted IPv4 address into network byte order. 0 for empty, invalid, broadcast or any.
+static uint32_t parse_ipv4(const std::string &text) {
+  uint32_t addr = 0;
+  if (text.empty() || inet_pton(AF_INET, text.c_str(), &addr) != 1)
+    return 0;
+  if (addr == htonl(INADDR_BROADCAST) || addr == htonl(INADDR_ANY))
+    return 0;
+  return addr;
+}
 
 // Replies are ~200 bytes; anything longer is not a DDP reply we care about.
 static constexpr size_t REPLY_BUFFER_SIZE = 512;
@@ -45,6 +59,9 @@ const char *console_state_to_string(ConsoleState state) {
 }
 
 void ConsoleMonitor::setup() {
+  if (this->remote_play_sensor_ != nullptr)
+    this->remote_play_sensor_->publish_initial_state(false);
+
   this->fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (this->fd_ < 0) {
     ESP_LOGE(TAG, "Could not create the UDP socket (errno %d)", errno);
@@ -94,7 +111,9 @@ bool ConsoleMonitor::resolve_address_() {
 void ConsoleMonitor::update() {
   if (this->fd_ < 0)
     return;
-  if (!this->resolve_address_()) {
+  const bool have_address = this->resolve_address_();
+  this->update_remote_play_filter_();
+  if (!have_address) {
     this->set_state_(ConsoleState::NO_ADDRESS);
     return;
   }
@@ -118,6 +137,8 @@ void ConsoleMonitor::update() {
 }
 
 void ConsoleMonitor::loop() {
+  if (this->remote_play_sensor_ != nullptr)
+    this->handle_remote_play_(millis());
   if (this->fd_ < 0)
     return;
   char buffer[REPLY_BUFFER_SIZE + 1];
@@ -127,6 +148,75 @@ void ConsoleMonitor::loop() {
       return;  // EWOULDBLOCK: nothing (more) to read
     buffer[len] = '\0';
     this->handle_reply_(buffer, static_cast<size_t>(len));
+  }
+}
+
+// Reads the Remote Play device's address (it may come from a text entity), hooks the WiFi
+// interface once the network is up and tells arp_watch which requests to count.
+void ConsoleMonitor::update_remote_play_filter_() {
+  if (this->remote_play_sensor_ == nullptr)
+    return;
+
+  std::string address = this->remote_play_address_.has_value() ? this->remote_play_address_.value() : "";
+  if (address != this->remote_play_current_) {
+    this->remote_play_current_ = std::move(address);
+    this->remote_play_addr_ = parse_ipv4(this->remote_play_current_);
+    if (this->remote_play_addr_ != 0) {
+      ESP_LOGI(TAG, "Watching for Remote Play requests from %s", this->remote_play_current_.c_str());
+    } else if (!this->remote_play_current_.empty()) {
+      ESP_LOGW(TAG, "Invalid Remote Play IP '%s'", this->remote_play_current_.c_str());
+    } else {
+      ESP_LOGD(TAG, "No Remote Play IP set");
+    }
+  }
+
+  if (network::is_connected()) {
+    const bool hooked = arp_watch::ensure_installed();
+    if (hooked != this->remote_play_hooked_ && !hooked)
+      ESP_LOGW(TAG, "Could not watch ARP on the WiFi interface");
+    this->remote_play_hooked_ = hooked;
+  }
+
+  const uint32_t target = this->address_valid_ ? this->dest_addr_ : 0;
+  const uint32_t sender = target != 0 ? this->remote_play_addr_ : 0;
+  if (sender == this->remote_play_filter_sender_ && target == this->remote_play_filter_target_)
+    return;
+  this->remote_play_filter_sender_ = sender;
+  this->remote_play_filter_target_ = target;
+  arp_watch::set_filter(sender, target);
+  // New device or console: start over.
+  this->remote_play_burst_ = 0;
+  if (this->remote_play_active_) {
+    this->remote_play_active_ = false;
+    this->remote_play_sensor_->publish_state(false);
+  }
+}
+
+// Turns the sensor on after `min_requests` requests, each within `window` of the previous one,
+// and off once `window` passes without any.
+void ConsoleMonitor::handle_remote_play_(uint32_t now) {
+  const uint32_t seen = arp_watch::take_count();
+  if (seen > 0) {
+    if (now - this->remote_play_last_ms_ > this->remote_play_window_ms_)
+      this->remote_play_burst_ = 0;
+    this->remote_play_burst_ = static_cast<uint8_t>(std::min<uint32_t>(this->remote_play_burst_ + seen, 255));
+    this->remote_play_last_ms_ = now;
+    ESP_LOGD(TAG, "%s is looking for the console (%u in a row)", this->remote_play_current_.c_str(),
+             this->remote_play_burst_);
+    if (!this->remote_play_active_ && this->remote_play_burst_ >= this->remote_play_min_requests_) {
+      ESP_LOGI(TAG, "Remote Play request from %s", this->remote_play_current_.c_str());
+      this->remote_play_active_ = true;
+      this->remote_play_sensor_->publish_state(true);
+    }
+    return;
+  }
+  if (this->remote_play_burst_ > 0 && now - this->remote_play_last_ms_ > this->remote_play_window_ms_) {
+    this->remote_play_burst_ = 0;
+    if (this->remote_play_active_) {
+      ESP_LOGD(TAG, "%s stopped looking for the console", this->remote_play_current_.c_str());
+      this->remote_play_active_ = false;
+      this->remote_play_sensor_->publish_state(false);
+    }
   }
 }
 
@@ -219,6 +309,13 @@ void ConsoleMonitor::dump_config() {
   LOG_BINARY_SENSOR("  ", "Power", this->power_sensor_);
   LOG_TEXT_SENSOR("  ", "Host name", this->host_name_sensor_);
   LOG_TEXT_SENSOR("  ", "System version", this->system_version_sensor_);
+  if (this->remote_play_sensor_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Remote Play device: %s",
+                  this->remote_play_current_.empty() ? "(not set yet)" : this->remote_play_current_.c_str());
+    ESP_LOGCONFIG(TAG, "  Remote Play: %u requests, at most %" PRIu32 " ms apart", this->remote_play_min_requests_,
+                  this->remote_play_window_ms_);
+    LOG_BINARY_SENSOR("  ", "Remote Play request", this->remote_play_sensor_);
+  }
 }
 
 }  // namespace esphome::wakepsx_on_bt

@@ -49,12 +49,24 @@ class ConsoleMonitor : public PollingComponent {
   void set_host_name_sensor(text_sensor::TextSensor *sensor) { this->host_name_sensor_ = sensor; }
   void set_system_version_sensor(text_sensor::TextSensor *sensor) { this->system_version_sensor_ = sensor; }
 
+  /// Remote Play requests: IPv4 of the device that looks for the console (an Apple TV running
+  /// Asobi, a phone with PS Remote Play...), constant or lambda read at every update. When it
+  /// keeps asking for the console's IP over ARP and nobody answers, the sensor turns on.
+  template<typename V> void set_remote_play_address(V address) { this->remote_play_address_ = address; }
+  /// Requests needed to turn the sensor on, each at most `window` ms after the previous one.
+  void set_remote_play_min_requests(uint8_t count) { this->remote_play_min_requests_ = count; }
+  /// Also how long the sensor stays on after the last request.
+  void set_remote_play_window(uint32_t ms) { this->remote_play_window_ms_ = ms; }
+  void set_remote_play_sensor(binary_sensor::BinarySensor *sensor) { this->remote_play_sensor_ = sensor; }
+
  protected:
   void handle_reply_(char *data, size_t len);
   void set_state_(ConsoleState state);
   static void publish_if_changed_(text_sensor::TextSensor *sensor, const std::string &value);
 
   bool resolve_address_();
+  void update_remote_play_filter_();
+  void handle_remote_play_(uint32_t now);
 
   TemplatableValue<std::string> address_;
   std::string current_address_;  // last address read, to notice changes
@@ -71,6 +83,19 @@ class ConsoleMonitor : public PollingComponent {
   binary_sensor::BinarySensor *power_sensor_{nullptr};
   text_sensor::TextSensor *host_name_sensor_{nullptr};
   text_sensor::TextSensor *system_version_sensor_{nullptr};
+
+  TemplatableValue<std::string> remote_play_address_;
+  std::string remote_play_current_;  // last address read, to notice changes
+  uint32_t remote_play_addr_{0};     // network byte order, 0 = not set or invalid
+  uint8_t remote_play_min_requests_{2};
+  uint32_t remote_play_window_ms_{15000};
+  uint8_t remote_play_burst_{0};     // requests in the current burst
+  uint32_t remote_play_last_ms_{0};  // when the last request was seen
+  bool remote_play_active_{false};
+  bool remote_play_hooked_{false};
+  uint32_t remote_play_filter_sender_{0};  // filter last handed to arp_watch
+  uint32_t remote_play_filter_target_{0};
+  binary_sensor::BinarySensor *remote_play_sensor_{nullptr};
 };
 
 }  // namespace esphome::wakepsx_on_bt

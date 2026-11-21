@@ -5,7 +5,9 @@ console and sends a raw HCI Create Connection through the controller's Virtual
 HCI interface. No Bluetooth host stack (Bluedroid/NimBLE) is used.
 
 Optionally (`console:`), it also reports whether the console is on, in rest mode
-or off, asking it at its IP over the local network with DDP.
+or off, asking it at its IP over the local network with DDP, and (`remote_play:`)
+whether a device is looking for the console over ARP without an answer, which is
+what the PS Remote Play app does when the console sleeps.
 """
 
 import esphome.codegen as cg
@@ -47,6 +49,10 @@ CONF_STATE = "state"
 CONF_POWER = "power"
 CONF_HOST_NAME = "host_name"
 CONF_SYSTEM_VERSION = "system_version"
+CONF_REMOTE_PLAY = "remote_play"
+CONF_MIN_REQUESTS = "min_requests"
+CONF_WINDOW = "window"
+CONF_REQUEST = "request"
 
 wakepsx_on_bt_ns = cg.esphome_ns.namespace("wakepsx_on_bt")
 WakePsxOnBt = wakepsx_on_bt_ns.class_("WakePsxOnBt", cg.Component)
@@ -73,6 +79,25 @@ def _host_id(value):
     return value
 
 
+# A device (Apple TV with Asobi, phone with PS Remote Play...) asking for the console's IP over
+# ARP again and again with no answer: it wants the console and the console is asleep.
+REMOTE_PLAY_SCHEMA = cv.Schema(
+    {
+        # IP of that device. Empty: nothing is watched.
+        cv.Optional(CONF_ADDRESS, default=""): cv.templatable(_console_address),
+        cv.Optional(CONF_MIN_REQUESTS, default=2): cv.int_range(min=1, max=10),
+        # Longest gap between two requests of one burst; also how long the sensor stays on
+        # after the last one. The PS Remote Play clients ask every ~5 s.
+        cv.Optional(CONF_WINDOW, default="15s"): cv.All(
+            cv.positive_time_period_milliseconds,
+            cv.Range(min=cv.TimePeriod(seconds=1), max=cv.TimePeriod(minutes=5)),
+        ),
+        cv.Optional(CONF_REQUEST, default={"name": "Remote Play request"}): binary_sensor.binary_sensor_schema(
+            icon="mdi:remote-tv",
+        ),
+    }
+)
+
 CONSOLE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(ConsoleMonitor),
@@ -92,6 +117,7 @@ CONSOLE_SCHEMA = cv.Schema(
             icon="mdi:package-up",
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
+        cv.Optional(CONF_REMOTE_PLAY): REMOTE_PLAY_SCHEMA,
     }
 ).extend(cv.polling_component_schema("10s"))
 
@@ -167,6 +193,13 @@ async def _console_to_code(config):
     if conf := config.get(CONF_SYSTEM_VERSION):
         sens = await text_sensor.new_text_sensor(conf)
         cg.add(mon.set_system_version_sensor(sens))
+    if conf := config.get(CONF_REMOTE_PLAY):
+        address = await cg.templatable(conf[CONF_ADDRESS], [], cg.std_string)
+        cg.add(mon.set_remote_play_address(address))
+        cg.add(mon.set_remote_play_min_requests(conf[CONF_MIN_REQUESTS]))
+        cg.add(mon.set_remote_play_window(int(conf[CONF_WINDOW].total_milliseconds)))
+        sens = await binary_sensor.new_binary_sensor(conf[CONF_REQUEST])
+        cg.add(mon.set_remote_play_sensor(sens))
 
 
 def _request_bt_controller():

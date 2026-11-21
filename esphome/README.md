@@ -81,6 +81,7 @@ The package provides:
 | **Wake console** button | Wakes the console with the two MACs below |
 | **Console IP** text field | Where the state sensors ask the console, saved on the ESP32 |
 | **Console state** / **Console power** (+ **Console name**, **Console firmware**) | Whether the console is on, in rest mode or off, asked over the local network (see [Console state](#console-state)) |
+| **Remote Play IP** text field, **Remote Play request**, **Auto wake on Remote Play** | Wake the console when you open Remote Play on another device (see [Remote Play request](#remote-play-request)) |
 | **Controller MAC** / **Console MAC** text fields | The MACs the button uses, editable from HA and saved on the ESP32 |
 | `api: actions: wake_psx` | Called by the integration as `esphome.<node>_wake_psx`; also stores the MACs it receives in the two fields |
 
@@ -184,6 +185,40 @@ wakepsx_on_bt:
       name: "Console name"
     system_version:
       name: "Console firmware"
+```
+
+---
+
+## Remote Play Request
+
+When you open PS Remote Play, or a client such as Asobi on an Apple TV, while the console sleeps, the device it runs on keeps asking the network "who has the console's IP?" (ARP) every few seconds, and nobody answers. Those requests are broadcast, so they reach the ESP32 over WiFi too. The ESP32 watches for them and wakes the console itself, with no Home Assistant automation involved.
+
+1. Give the device you play from a fixed IP on your router (DHCP reservation).
+2. Set it in **Remote Play IP** on the ESP32's device page (Configuration section). **Console IP** must be set too.
+3. Open Remote Play with the console asleep. **Remote Play request** turns on after two requests and, with **Auto wake on Remote Play** on (the default), the ESP32 presses **Wake console**.
+
+| Entity | What it does |
+|---|---|
+| **Remote Play IP** | The device to watch. Empty: nothing is watched. Saved on the ESP32 (or `substitutions: remote_play_ip:` for the first boot) |
+| **Remote Play request** | `on` while that device keeps asking for the console without an answer; `off` 15 s after it stops |
+| **Auto wake on Remote Play** | On: wake the console when the request starts, if **Console power** is off. Off: only report it, so a Home Assistant automation can decide (trigger on **Remote Play request** turning on) |
+
+Only requests from **Remote Play IP** for **Console IP** count, so other devices and the ESP32's own state checks are ignored. Once the console is awake it answers the device and the requests stop. If your router isolates WiFi clients or turns broadcasts into unicast, the requests never reach the ESP32; the log shows `… is looking for the console` at debug level when they do.
+
+With the standalone component, add `remote_play:` inside `console:`:
+
+```yaml
+wakepsx_on_bt:
+  console:
+    address: 192.168.1.105
+    remote_play:
+      address: 192.168.1.102   # or: !lambda return id(my_text).state;
+      min_requests: 2          # requests in a row before it turns on
+      window: 15s              # longest gap between them; also how long it stays on
+      request:
+        name: "Remote Play request"
+        on_press:
+          - button.press: my_wake_button
 ```
 
 ---

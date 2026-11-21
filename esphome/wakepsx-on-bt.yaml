@@ -24,6 +24,10 @@ substitutions:
   # and set it from the device page (Console IP) instead; after that the value
   # saved on the ESP32 wins. Give the console a fixed IP (DHCP reservation).
   console_ip: ""
+  # IP of the device you play from (Apple TV with Asobi, phone with PS Remote
+  # Play...) for Remote Play request on the first boot. Leave it empty and set it
+  # from the device page (Remote Play IP) instead. Give it a fixed IP too.
+  remote_play_ip: ""
 
 esphome:
   # The Home Assistant integration finds the node by this project name
@@ -52,11 +56,28 @@ wakepsx_on_bt:
     state:
       name: "Console state"
     power:
+      id: wakepsx_console_power
       name: "Console power"
     host_name:
       name: "Console name"
     system_version:
       name: "Console firmware"
+    # On while the device at Remote Play IP keeps asking for the console over
+    # ARP and gets no answer: the Remote Play app was opened and the console is
+    # asleep. Wakes it right away if Auto wake on Remote Play is on.
+    remote_play:
+      address: !lambda return id(wakepsx_remote_play_ip).state;
+      request:
+        name: "Remote Play request"
+        on_press:
+          - if:
+              condition:
+                and:
+                  - switch.is_on: wakepsx_auto_wake
+                  - binary_sensor.is_off: wakepsx_console_power
+              then:
+                - logger.log: "Remote Play request: waking the console"
+                - button.press: wakepsx_wake_button
 
 # The two MACs the ESP32 needs, editable from the device page in Home Assistant
 # and saved in flash. Read them with the page linked in the README (controller
@@ -97,6 +118,29 @@ text:
     initial_value: "${console_ip}"
     max_length: 15
     pattern: "^$|^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+
+  # The device that looks for the console (see Remote Play request). Empty: off.
+  - platform: template
+    id: wakepsx_remote_play_ip
+    name: "Remote Play IP"
+    icon: mdi:television-play
+    entity_category: config
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: "${remote_play_ip}"
+    max_length: 15
+    pattern: "^$|^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+
+# Off: Remote Play request is only reported, Home Assistant decides what to do.
+switch:
+  - platform: template
+    id: wakepsx_auto_wake
+    name: "Auto wake on Remote Play"
+    icon: mdi:power-sleep
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
 
 # Wakes the console with the MACs above. Missing or malformed MACs show up as
 # "Invalid MAC" on the status sensor.

@@ -65,7 +65,7 @@ The package brings the external component, the `esp32dev` board with ESP-IDF, th
 
 ## Releasing
 
-Publish a release on GitHub from the latest commit of `main`, with a tag like `v1.2.3`, and write the notes as usual. The [Release workflow](.github/workflows/release.yml) then runs on its own: it bumps the version on `main` and moves the tag to a commit where the ESPHome package pulls the component from that same tag, so pinning `…/wakepsx-on-bt.yaml@v0.6.0` pins everything.
+Publish a release on GitHub from the latest commit of `main`, with a tag like `v1.2.3`, and write the notes as usual. The [Release workflow](.github/workflows/release.yml) then runs on its own: it bumps the version on `main` and moves the tag to a commit where the ESPHome package pulls the component from that same tag, so pinning `…/wakepsx-on-bt.yaml@v0.6.1` pins everything.
 
 ## License
 

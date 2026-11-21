@@ -65,7 +65,7 @@ A complete node file with secrets is in [esp-wakepsx-on-bt.yaml](esp-wakepsx-on-
 
 ```yaml
 packages:
-  wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@v0.6.0
+  wakepsx: github://victorigualada/wakepsx-on-bt/esphome/wakepsx-on-bt.yaml@v0.6.1
 ```
 
 (v0.2.0 is the exception: it still pulls the component from `main` unless you also set `substitutions: wakepsx_ref: v0.2.0`.)
@@ -113,7 +113,7 @@ If you want to wire it yourself (for example to wake from an ESPHome button or a
 esphome:
   project:
     name: "victorigualada.esp-wakepsx-on-bt"   # keep it if you use the HA integration
-    version: "0.6.0"
+    version: "0.6.1"
 
 esp32:
   board: esp32dev

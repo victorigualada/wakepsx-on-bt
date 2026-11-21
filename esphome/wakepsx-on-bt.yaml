@@ -14,7 +14,7 @@ substitutions:
   # tag the release workflow sets it to that same tag, so pinning the package
   # (…/wakepsx-on-bt.yaml@vX.Y.Z) also pins the component. Override it only to
   # mix versions on purpose.
-  wakepsx_ref: main
+  wakepsx_ref: v0.6.1
   # MACs the "Wake console" button uses on the first boot. Leave them empty and
   # set them from the device page in Home Assistant instead (Controller MAC /
   # Console MAC); after that the values saved on the ESP32 win over these.

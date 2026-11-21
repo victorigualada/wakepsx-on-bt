@@ -76,6 +76,7 @@ class ConsoleMonitor : public PollingComponent {
   void handle_remote_play_(uint32_t now);
   void handle_remote_play_request_(uint32_t sender, uint32_t now);
   void reset_remote_play_();
+  void keep_wifi_awake_(bool awake);
 
   TemplatableValue<std::string> address_;
   std::string current_address_;  // last address read, to notice changes
@@ -111,6 +112,7 @@ class ConsoleMonitor : public PollingComponent {
   RemotePlayDevice remote_play_devices_[MAX_REMOTE_PLAY_DEVICES]{};
   bool remote_play_active_{false};
   bool remote_play_hooked_{false};
+  bool remote_play_wifi_awake_{false};  // holds a WiFi high-performance request
   binary_sensor::BinarySensor *remote_play_sensor_{nullptr};
   text_sensor::TextSensor *remote_play_device_sensor_{nullptr};
 };

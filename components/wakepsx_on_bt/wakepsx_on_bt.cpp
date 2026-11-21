@@ -8,6 +8,7 @@
 #include "esp_bt.h"
 #include "esp_err.h"
 #include "esp_mac.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -231,11 +232,23 @@ void WakePsxOnBt::wake_task_(void *arg) {
   auto *params = static_cast<TaskParams *>(arg);
   WakePsxOnBt *self = params->parent;
 
+  // ESP-IDF needs WiFi modem sleep while the BT controller runs next to WiFi. When WiFi power
+  // save is off (Remote Play watching keeps it off to hear every broadcast), turn it on for the
+  // wake and back off afterwards.
+  wifi_ps_type_t ps_before = WIFI_PS_MIN_MODEM;
+  const bool restore_ps_none = esp_wifi_get_ps(&ps_before) == ESP_OK && ps_before == WIFI_PS_NONE;
+  if (restore_ps_none) {
+    ESP_LOGD(TAG, "WiFi power save on for the wake");
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+  }
+
   // Every path ends here: publish the result, power the controller down, keep the result on
   // screen for a while, then go back to Ready and accept the next wake.
-  auto finish = [params, self](WakeStatus result) {
+  auto finish = [params, self, restore_ps_none](WakeStatus result) {
     self->post_status_(result);
     cleanup_bt_controller();
+    if (restore_ps_none)
+      esp_wifi_set_ps(WIFI_PS_NONE);
     ESP_LOGD(TAG, "Wake task stack headroom: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     vTaskDelay(pdMS_TO_TICKS(WAKE_RESULT_DISPLAY_MS));
     self->post_status_(WakeStatus::READY);

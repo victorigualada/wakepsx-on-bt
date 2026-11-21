@@ -2,9 +2,13 @@
 
 #include "console_monitor.h"
 
+#include "esphome/core/defines.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 #include "esphome/components/network/util.h"
+#ifdef USE_WIFI_RUNTIME_POWER_SAVE
+#include "esphome/components/wifi/wifi_component.h"
+#endif
 
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -277,11 +281,31 @@ void ConsoleMonitor::update_remote_play_filter_() {
   }
 
   const uint32_t target = this->address_valid_ ? ntohl(this->dest_addr_) : 0;
+  this->keep_wifi_awake_(!this->remote_play_ranges_.empty() && target != 0);
   if (!changed && target == this->remote_play_target_)
     return;
   this->remote_play_target_ = target;
   arp_watch::set_filter(this->remote_play_ranges_.data(), this->remote_play_ranges_.size(), target);
   this->reset_remote_play_();  // new devices or console: start over
+}
+
+// With WiFi power save on (ESPHome's default on the ESP32) the radio sleeps between beacons and
+// gets broadcasts only when it wakes for one, so most of the ARP requests never arrive. Keep it
+// awake while there is something to watch. The wake task turns power save back on for the
+// Bluetooth part, which ESP-IDF requires next to WiFi.
+void ConsoleMonitor::keep_wifi_awake_(bool awake) {
+#ifdef USE_WIFI_RUNTIME_POWER_SAVE
+  if (awake == this->remote_play_wifi_awake_ || wifi::global_wifi_component == nullptr)
+    return;
+  const bool ok = awake ? wifi::global_wifi_component->request_high_performance()
+                        : wifi::global_wifi_component->release_high_performance();
+  if (!ok) {
+    ESP_LOGW(TAG, "Could not change WiFi power save");
+    return;
+  }
+  this->remote_play_wifi_awake_ = awake;
+  ESP_LOGD(TAG, "WiFi power save %s while watching for Remote Play", awake ? "off" : "back to the configured mode");
+#endif
 }
 
 void ConsoleMonitor::reset_remote_play_() {

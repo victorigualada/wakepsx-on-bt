@@ -214,7 +214,7 @@ For example `192.168.1.102, 192.168.1.200-210`. Invalid entries are skipped and 
 | **Remote Play device** | IP of the device that turned the request on last, published just before it turns on, so automations can tell your devices apart |
 | **Auto wake on Remote Play** | On: wake the console when the request starts, if **Console power** is off. Off: only report it, so a Home Assistant automation can decide (trigger on **Remote Play request** turning on) |
 
-Each device counts on its own: one request from the Apple TV and one from a phone are not two in a row. Only requests for **Console IP** count, so the ESP32's own state checks are ignored.
+Each device counts on its own: one request from the Apple TV and one from a phone are not two in a row. While there is something to watch, the ESP32 keeps WiFi power save off (ESPHome turns it on by default on the ESP32): with it on, the radio sleeps between beacons and misses most of the requests. It goes back on for the few seconds of each Bluetooth wake, as ESP-IDF requires next to WiFi. Only requests for **Console IP** count, so the ESP32's own state checks are ignored.
 
 Do not list devices that talk to the console for other reasons, above all your router: when traffic from the internet arrives for a sleeping console, the router asks for it a few times in a row too, and that would wake it. A range or subnet that covers the router or Home Assistant has the same problem. Once the console is awake it answers the device and the requests stop. If your router isolates WiFi clients or turns broadcasts into unicast, the requests never reach the ESP32; the log shows `… is looking for the console` at debug level when they do.
 

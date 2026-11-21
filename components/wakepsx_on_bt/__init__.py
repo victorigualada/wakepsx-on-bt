@@ -255,9 +255,21 @@ async def _console_to_code(config):
         cg.add(mon.set_remote_play_window(int(conf[CONF_WINDOW].total_milliseconds)))
         sens = await binary_sensor.new_binary_sensor(conf[CONF_REQUEST])
         cg.add(mon.set_remote_play_sensor(sens))
+        _request_wifi_power_save_control()
         if device := conf.get(CONF_DEVICE):
             sens = await text_sensor.new_text_sensor(device)
             cg.add(mon.set_remote_play_device_sensor(sens))
+
+
+def _request_wifi_power_save_control():
+    """Let the console monitor turn WiFi power save off while it watches for Remote Play: with it
+    on, the radio sleeps between beacons and misses most broadcast ARP requests."""
+    if "wifi" not in CORE.config:
+        return
+    from esphome.components import wifi
+
+    if hasattr(wifi, "enable_runtime_power_save_control"):  # ESPHome 2025.x+
+        wifi.enable_runtime_power_save_control()
 
 
 def _request_bt_controller():

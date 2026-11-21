@@ -1,7 +1,6 @@
 // Console state over DDP (PlayStation Device Discovery Protocol).
 
 #include "console_monitor.h"
-#include "arp_watch.h"
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -38,6 +37,100 @@ static uint32_t parse_ipv4(const std::string &text) {
   if (addr == htonl(INADDR_BROADCAST) || addr == htonl(INADDR_ANY))
     return 0;
   return addr;
+}
+
+static std::string ip_to_string(uint32_t host_order) {
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%u.%u.%u.%u", static_cast<unsigned>(host_order >> 24),
+           static_cast<unsigned>((host_order >> 16) & 0xFF), static_cast<unsigned>((host_order >> 8) & 0xFF),
+           static_cast<unsigned>(host_order & 0xFF));
+  return buf;
+}
+
+static bool parse_number(const std::string &text, unsigned max, unsigned *out) {
+  if (text.empty() || text.size() > 3)
+    return false;
+  unsigned value = 0;
+  for (char c : text) {
+    if (c < '0' || c > '9')
+      return false;
+    value = value * 10 + (c - '0');
+  }
+  if (value > max)
+    return false;
+  *out = value;
+  return true;
+}
+
+// One entry of the Remote Play list, spaces already removed:
+//   192.168.1.102                  one address
+//   192.168.1.200-192.168.1.210    a range, both ends included
+//   192.168.1.200-210              the same, the second end as its last number only
+//   192.168.1.192/28               a subnet (prefix 8 to 32)
+static bool parse_range(const std::string &item, arp_watch::Range *range) {
+  const size_t slash = item.find('/');
+  const size_t dash = item.find('-');
+  if (slash != std::string::npos) {
+    unsigned prefix;
+    const uint32_t addr = ntohl(parse_ipv4(item.substr(0, slash)));
+    if (addr == 0 || !parse_number(item.substr(slash + 1), 32, &prefix) || prefix < 8)
+      return false;
+    const uint32_t mask = prefix == 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> prefix);
+    range->first = addr & mask;
+    range->last = range->first | ~mask;
+    return true;
+  }
+  if (dash != std::string::npos) {
+    const uint32_t first = ntohl(parse_ipv4(item.substr(0, dash)));
+    const std::string end = item.substr(dash + 1);
+    uint32_t last;
+    unsigned octet;
+    if (end.find('.') != std::string::npos) {
+      last = ntohl(parse_ipv4(end));
+    } else if (parse_number(end, 255, &octet)) {
+      last = (first & 0xFFFFFF00u) | octet;
+    } else {
+      return false;
+    }
+    if (first == 0 || last == 0 || last < first)
+      return false;
+    range->first = first;
+    range->last = last;
+    return true;
+  }
+  const uint32_t addr = ntohl(parse_ipv4(item));
+  if (addr == 0)
+    return false;
+  range->first = range->last = addr;
+  return true;
+}
+
+// Parses "192.168.1.102, 192.168.1.200-210" (commas or semicolons between entries). Invalid
+// entries are logged and skipped; at most arp_watch::MAX_RANGES are kept.
+static std::vector<arp_watch::Range> parse_range_list(const std::string &text) {
+  std::vector<arp_watch::Range> ranges;
+  std::string item;
+  for (size_t i = 0; i <= text.size(); i++) {
+    const char c = i < text.size() ? text[i] : ',';
+    if (c != ',' && c != ';') {
+      if (c != ' ' && c != '\t')
+        item += c;
+      continue;
+    }
+    if (item.empty())
+      continue;
+    arp_watch::Range range;
+    if (!parse_range(item, &range)) {
+      ESP_LOGW(TAG, "Ignoring invalid Remote Play entry '%s'", item.c_str());
+    } else if (ranges.size() >= arp_watch::MAX_RANGES) {
+      ESP_LOGW(TAG, "Ignoring Remote Play entry '%s': at most %u entries", item.c_str(),
+               static_cast<unsigned>(arp_watch::MAX_RANGES));
+    } else {
+      ranges.push_back(range);
+    }
+    item.clear();
+  }
+  return ranges;
 }
 
 // Replies are ~200 bytes; anything longer is not a DDP reply we care about.
@@ -151,22 +244,28 @@ void ConsoleMonitor::loop() {
   }
 }
 
-// Reads the Remote Play device's address (it may come from a text entity), hooks the WiFi
-// interface once the network is up and tells arp_watch which requests to count.
+// Reads the Remote Play list (it may come from a text entity), hooks the WiFi interface once
+// the network is up and tells arp_watch which requests to watch.
 void ConsoleMonitor::update_remote_play_filter_() {
   if (this->remote_play_sensor_ == nullptr)
     return;
 
-  std::string address = this->remote_play_address_.has_value() ? this->remote_play_address_.value() : "";
-  if (address != this->remote_play_current_) {
-    this->remote_play_current_ = std::move(address);
-    this->remote_play_addr_ = parse_ipv4(this->remote_play_current_);
-    if (this->remote_play_addr_ != 0) {
-      ESP_LOGI(TAG, "Watching for Remote Play requests from %s", this->remote_play_current_.c_str());
-    } else if (!this->remote_play_current_.empty()) {
-      ESP_LOGW(TAG, "Invalid Remote Play IP '%s'", this->remote_play_current_.c_str());
-    } else {
-      ESP_LOGD(TAG, "No Remote Play IP set");
+  std::string list = this->remote_play_address_.has_value() ? this->remote_play_address_.value() : "";
+  bool changed = false;
+  if (list != this->remote_play_current_) {
+    this->remote_play_current_ = std::move(list);
+    this->remote_play_ranges_ = parse_range_list(this->remote_play_current_);
+    changed = true;
+    if (this->remote_play_ranges_.empty()) {
+      ESP_LOGD(TAG, "No Remote Play devices set");
+    }
+    for (const auto &range : this->remote_play_ranges_) {
+      if (range.first == range.last) {
+        ESP_LOGI(TAG, "Watching for Remote Play requests from %s", ip_to_string(range.first).c_str());
+      } else {
+        ESP_LOGI(TAG, "Watching for Remote Play requests from %s to %s", ip_to_string(range.first).c_str(),
+                 ip_to_string(range.last).c_str());
+      }
     }
   }
 
@@ -177,46 +276,85 @@ void ConsoleMonitor::update_remote_play_filter_() {
     this->remote_play_hooked_ = hooked;
   }
 
-  const uint32_t target = this->address_valid_ ? this->dest_addr_ : 0;
-  const uint32_t sender = target != 0 ? this->remote_play_addr_ : 0;
-  if (sender == this->remote_play_filter_sender_ && target == this->remote_play_filter_target_)
+  const uint32_t target = this->address_valid_ ? ntohl(this->dest_addr_) : 0;
+  if (!changed && target == this->remote_play_target_)
     return;
-  this->remote_play_filter_sender_ = sender;
-  this->remote_play_filter_target_ = target;
-  arp_watch::set_filter(sender, target);
-  // New device or console: start over.
-  this->remote_play_burst_ = 0;
+  this->remote_play_target_ = target;
+  arp_watch::set_filter(this->remote_play_ranges_.data(), this->remote_play_ranges_.size(), target);
+  this->reset_remote_play_();  // new devices or console: start over
+}
+
+void ConsoleMonitor::reset_remote_play_() {
+  for (auto &device : this->remote_play_devices_)
+    device = {};
   if (this->remote_play_active_) {
     this->remote_play_active_ = false;
     this->remote_play_sensor_->publish_state(false);
   }
 }
 
-// Turns the sensor on after `min_requests` requests, each within `window` of the previous one,
-// and off once `window` passes without any.
+// Each device counts on its own: the sensor turns on when one of them sends `min_requests`
+// requests, each within `window` of its previous one, and off once `window` passes without a
+// request from any device that got there.
 void ConsoleMonitor::handle_remote_play_(uint32_t now) {
-  const uint32_t seen = arp_watch::take_count();
-  if (seen > 0) {
-    if (now - this->remote_play_last_ms_ > this->remote_play_window_ms_)
-      this->remote_play_burst_ = 0;
-    this->remote_play_burst_ = static_cast<uint8_t>(std::min<uint32_t>(this->remote_play_burst_ + seen, 255));
-    this->remote_play_last_ms_ = now;
-    ESP_LOGD(TAG, "%s is looking for the console (%u in a row)", this->remote_play_current_.c_str(),
-             this->remote_play_burst_);
-    if (!this->remote_play_active_ && this->remote_play_burst_ >= this->remote_play_min_requests_) {
-      ESP_LOGI(TAG, "Remote Play request from %s", this->remote_play_current_.c_str());
-      this->remote_play_active_ = true;
-      this->remote_play_sensor_->publish_state(true);
+  bool any_counted = false;
+  for (auto &device : this->remote_play_devices_) {
+    if (device.ip == 0)
+      continue;
+    if (now - device.last_ms > this->remote_play_window_ms_) {
+      if (device.counted)
+        ESP_LOGD(TAG, "%s stopped looking for the console", ip_to_string(device.ip).c_str());
+      device = {};
+      continue;
     }
-    return;
+    any_counted |= device.counted;
   }
-  if (this->remote_play_burst_ > 0 && now - this->remote_play_last_ms_ > this->remote_play_window_ms_) {
-    this->remote_play_burst_ = 0;
-    if (this->remote_play_active_) {
-      ESP_LOGD(TAG, "%s stopped looking for the console", this->remote_play_current_.c_str());
-      this->remote_play_active_ = false;
-      this->remote_play_sensor_->publish_state(false);
+  if (this->remote_play_active_ && !any_counted) {
+    this->remote_play_active_ = false;
+    this->remote_play_sensor_->publish_state(false);
+  }
+
+  uint32_t sender;
+  while (arp_watch::pop(&sender))
+    this->handle_remote_play_request_(sender, now);
+}
+
+void ConsoleMonitor::handle_remote_play_request_(uint32_t sender, uint32_t now) {
+  // Its slot, else a free one, else the one quiet for longest.
+  RemotePlayDevice *slot = nullptr;
+  RemotePlayDevice *free_slot = nullptr;
+  RemotePlayDevice *oldest = &this->remote_play_devices_[0];
+  for (auto &device : this->remote_play_devices_) {
+    if (device.ip == sender) {
+      slot = &device;
+      break;
     }
+    if (device.ip == 0 && free_slot == nullptr)
+      free_slot = &device;
+    if (now - device.last_ms > now - oldest->last_ms)
+      oldest = &device;
+  }
+  if (slot == nullptr) {
+    slot = free_slot != nullptr ? free_slot : oldest;
+    *slot = {sender, now, 0, false};
+  }
+
+  if (slot->burst < 255)
+    slot->burst++;
+  slot->last_ms = now;
+  const std::string ip = ip_to_string(sender);
+  ESP_LOGD(TAG, "%s is looking for the console (%u in a row)", ip.c_str(), slot->burst);
+  if (slot->counted || slot->burst < this->remote_play_min_requests_)
+    return;
+
+  slot->counted = true;
+  ESP_LOGI(TAG, "Remote Play request from %s", ip.c_str());
+  // The device first, so automations on the request can read it.
+  if (this->remote_play_device_sensor_ != nullptr)
+    this->remote_play_device_sensor_->publish_state(ip);
+  if (!this->remote_play_active_) {
+    this->remote_play_active_ = true;
+    this->remote_play_sensor_->publish_state(true);
   }
 }
 
@@ -310,11 +448,13 @@ void ConsoleMonitor::dump_config() {
   LOG_TEXT_SENSOR("  ", "Host name", this->host_name_sensor_);
   LOG_TEXT_SENSOR("  ", "System version", this->system_version_sensor_);
   if (this->remote_play_sensor_ != nullptr) {
-    ESP_LOGCONFIG(TAG, "  Remote Play device: %s",
-                  this->remote_play_current_.empty() ? "(not set yet)" : this->remote_play_current_.c_str());
+    ESP_LOGCONFIG(TAG, "  Remote Play devices: %s (%u entries)",
+                  this->remote_play_current_.empty() ? "(not set yet)" : this->remote_play_current_.c_str(),
+                  static_cast<unsigned>(this->remote_play_ranges_.size()));
     ESP_LOGCONFIG(TAG, "  Remote Play: %u requests, at most %" PRIu32 " ms apart", this->remote_play_min_requests_,
                   this->remote_play_window_ms_);
     LOG_BINARY_SENSOR("  ", "Remote Play request", this->remote_play_sensor_);
+    LOG_TEXT_SENSOR("  ", "Remote Play device", this->remote_play_device_sensor_);
   }
 }
 

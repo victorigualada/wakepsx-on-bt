@@ -81,7 +81,7 @@ The package provides:
 | **Wake console** button | Wakes the console with the two MACs below |
 | **Console IP** text field | Where the state sensors ask the console, saved on the ESP32 |
 | **Console state** / **Console power** (+ **Console name**, **Console firmware**) | Whether the console is on, in rest mode or off, asked over the local network (see [Console state](#console-state)) |
-| **Remote Play IP** text field, **Remote Play request**, **Auto wake on Remote Play** | Wake the console when you open Remote Play on another device (see [Remote Play request](#remote-play-request)) |
+| **Remote Play IPs** text field, **Remote Play request** / **Remote Play device**, **Auto wake on Remote Play** | Wake the console when you open Remote Play on another device (see [Remote Play request](#remote-play-request)) |
 | **Controller MAC** / **Console MAC** text fields | The MACs the button uses, editable from HA and saved on the ESP32 |
 | `api: actions: wake_psx` | Called by the integration as `esphome.<node>_wake_psx`; also stores the MACs it receives in the two fields |
 
@@ -193,17 +193,30 @@ wakepsx_on_bt:
 
 When you open PS Remote Play, or a client such as Asobi on an Apple TV, while the console sleeps, the device it runs on keeps asking the network "who has the console's IP?" (ARP) every few seconds, and nobody answers. Those requests are broadcast, so they reach the ESP32 over WiFi too. The ESP32 watches for them and wakes the console itself, with no Home Assistant automation involved.
 
-1. Give the device you play from a fixed IP on your router (DHCP reservation).
-2. Set it in **Remote Play IP** on the ESP32's device page (Configuration section). **Console IP** must be set too.
-3. Open Remote Play with the console asleep. **Remote Play request** turns on after two requests and, with **Auto wake on Remote Play** on (the default), the ESP32 presses **Wake console**.
+1. Give the devices you play from fixed IPs on your router (DHCP reservations).
+2. Set them in **Remote Play IPs** on the ESP32's device page (Configuration section). **Console IP** must be set too.
+3. Open Remote Play with the console asleep. **Remote Play request** turns on after two requests from one device and, with **Auto wake on Remote Play** on (the default), the ESP32 presses **Wake console**.
+
+**Remote Play IPs** takes up to 8 entries separated by commas, each one of:
+
+| Entry | Example | Matches |
+|---|---|---|
+| An IP | `192.168.1.102` | That device |
+| A range | `192.168.1.200-192.168.1.210` or `192.168.1.200-210` | Every IP from the first to the last, both included |
+| A subnet | `192.168.1.192/28` | `192.168.1.192` to `192.168.1.207` (prefix 8 to 32) |
+
+For example `192.168.1.102, 192.168.1.200-210`. Invalid entries are skipped and logged as a warning; the others still work.
 
 | Entity | What it does |
 |---|---|
-| **Remote Play IP** | The device to watch. Empty: nothing is watched. Saved on the ESP32 (or `substitutions: remote_play_ip:` for the first boot) |
-| **Remote Play request** | `on` while that device keeps asking for the console without an answer; `off` 15 s after it stops |
+| **Remote Play IPs** | The devices to watch. Empty: nothing is watched. Saved on the ESP32 (or `substitutions: remote_play_ip:` for the first boot) |
+| **Remote Play request** | `on` while one of those devices keeps asking for the console without an answer; `off` 15 s after the last one stops |
+| **Remote Play device** | IP of the device that turned the request on last, published just before it turns on, so automations can tell your devices apart |
 | **Auto wake on Remote Play** | On: wake the console when the request starts, if **Console power** is off. Off: only report it, so a Home Assistant automation can decide (trigger on **Remote Play request** turning on) |
 
-Only requests from **Remote Play IP** for **Console IP** count, so other devices and the ESP32's own state checks are ignored. Once the console is awake it answers the device and the requests stop. If your router isolates WiFi clients or turns broadcasts into unicast, the requests never reach the ESP32; the log shows `… is looking for the console` at debug level when they do.
+Each device counts on its own: one request from the Apple TV and one from a phone are not two in a row. Only requests for **Console IP** count, so the ESP32's own state checks are ignored.
+
+Do not list devices that talk to the console for other reasons, above all your router: when traffic from the internet arrives for a sleeping console, the router asks for it a few times in a row too, and that would wake it. A range or subnet that covers the router or Home Assistant has the same problem. Once the console is awake it answers the device and the requests stop. If your router isolates WiFi clients or turns broadcasts into unicast, the requests never reach the ESP32; the log shows `… is looking for the console` at debug level when they do.
 
 With the standalone component, add `remote_play:` inside `console:`:
 
@@ -212,13 +225,15 @@ wakepsx_on_bt:
   console:
     address: 192.168.1.105
     remote_play:
-      address: 192.168.1.102   # or: !lambda return id(my_text).state;
-      min_requests: 2          # requests in a row before it turns on
+      address: 192.168.1.102, 192.168.1.200-210   # or: !lambda return id(my_text).state;
+      min_requests: 2          # requests in a row from one device before it turns on
       window: 15s              # longest gap between them; also how long it stays on
       request:
         name: "Remote Play request"
         on_press:
           - button.press: my_wake_button
+      device:                  # optional
+        name: "Remote Play device"
 ```
 
 ---

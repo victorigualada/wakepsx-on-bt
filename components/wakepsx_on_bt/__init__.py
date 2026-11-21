@@ -10,6 +10,8 @@ whether a device is looking for the console over ARP without an answer, which is
 what the PS Remote Play app does when the console sleeps.
 """
 
+import ipaddress
+
 import esphome.codegen as cg
 from esphome import automation
 from esphome.components import binary_sensor, esp32, text_sensor
@@ -53,6 +55,8 @@ CONF_REMOTE_PLAY = "remote_play"
 CONF_MIN_REQUESTS = "min_requests"
 CONF_WINDOW = "window"
 CONF_REQUEST = "request"
+CONF_DEVICE = "device"
+MAX_REMOTE_PLAY_ENTRIES = 8  # arp_watch::MAX_RANGES
 
 wakepsx_on_bt_ns = cg.esphome_ns.namespace("wakepsx_on_bt")
 WakePsxOnBt = wakepsx_on_bt_ns.class_("WakePsxOnBt", cg.Component)
@@ -79,12 +83,59 @@ def _host_id(value):
     return value
 
 
+def _ipv4_int(text):
+    return int(ipaddress.IPv4Address(text))
+
+
+def _remote_play_entry(item):
+    """One entry: an IP, a range (a.b.c.d-e.f.g.h or a.b.c.d-N) or a subnet (a.b.c.d/N, N 8-32).
+    Mirrors parse_range() in console_monitor.cpp."""
+    try:
+        if "/" in item:
+            net = ipaddress.IPv4Network(item, strict=False)
+            if net.prefixlen < 8:
+                raise ValueError
+            return
+        if "-" in item:
+            start, end = item.split("-", 1)
+            first = _ipv4_int(start)
+            if "." in end:
+                last = _ipv4_int(end)
+            elif end.isdigit() and int(end) <= 255:
+                last = (first & 0xFFFFFF00) | int(end)
+            else:
+                raise ValueError
+            if last < first:
+                raise ValueError
+            return
+        _ipv4_int(item)
+    except ValueError as err:
+        raise cv.Invalid(
+            f"'{item}' is not an IP, a range (192.168.1.200-210) or a subnet (192.168.1.192/28)"
+        ) from err
+
+
+def _remote_play_list(value):
+    """IPs, ranges and subnets separated by commas. Empty: nothing is watched."""
+    value = cv.string_strict(value)
+    items = [
+        "".join(item.split())
+        for item in value.replace(";", ",").split(",")
+        if item.strip()
+    ]
+    if len(items) > MAX_REMOTE_PLAY_ENTRIES:
+        raise cv.Invalid(f"At most {MAX_REMOTE_PLAY_ENTRIES} entries")
+    for item in items:
+        _remote_play_entry(item)
+    return ", ".join(items)
+
+
 # A device (Apple TV with Asobi, phone with PS Remote Play...) asking for the console's IP over
 # ARP again and again with no answer: it wants the console and the console is asleep.
 REMOTE_PLAY_SCHEMA = cv.Schema(
     {
-        # IP of that device. Empty: nothing is watched.
-        cv.Optional(CONF_ADDRESS, default=""): cv.templatable(_console_address),
+        # Those devices: IPs, ranges and subnets separated by commas. Empty: nothing is watched.
+        cv.Optional(CONF_ADDRESS, default=""): cv.templatable(_remote_play_list),
         cv.Optional(CONF_MIN_REQUESTS, default=2): cv.int_range(min=1, max=10),
         # Longest gap between two requests of one burst; also how long the sensor stays on
         # after the last one. The PS Remote Play clients ask every ~5 s.
@@ -94,6 +145,10 @@ REMOTE_PLAY_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_REQUEST, default={"name": "Remote Play request"}): binary_sensor.binary_sensor_schema(
             icon="mdi:remote-tv",
+        ),
+        # IP of the device that turned the request on last.
+        cv.Optional(CONF_DEVICE): text_sensor.text_sensor_schema(
+            icon="mdi:television-play",
         ),
     }
 )
@@ -200,6 +255,9 @@ async def _console_to_code(config):
         cg.add(mon.set_remote_play_window(int(conf[CONF_WINDOW].total_milliseconds)))
         sens = await binary_sensor.new_binary_sensor(conf[CONF_REQUEST])
         cg.add(mon.set_remote_play_sensor(sens))
+        if device := conf.get(CONF_DEVICE):
+            sens = await text_sensor.new_text_sensor(device)
+            cg.add(mon.set_remote_play_device_sensor(sens))
 
 
 def _request_bt_controller():

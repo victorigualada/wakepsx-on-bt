@@ -22,7 +22,7 @@ Wake up your PlayStation (PS3, PS4, PS5) from Home Assistant over Bluetooth.
 3. **Paste them** into **Controller MAC** and **Console MAC** on the ESP32's device page in Home Assistant (or set the `controller_mac` / `console_mac` substitutions in the node's YAML).
 4. Press **Wake console**. It is a normal button entity: use it in dashboards, scripts and automations.
 
-Set **Console IP** on the same page (give the console a fixed IP on your router) and the node also shows **Console state** (`On` / `Rest` / `Off`) and **Console power**, asked over the local network ([details](esphome/README.md#console-state)). Set **Remote Play IP** to the device you play from (an Apple TV with Asobi, a phone with PS Remote Play) and the ESP32 wakes the console as soon as you open Remote Play there ([details](esphome/README.md#remote-play-request)).
+Set **Console IP** on the same page (give the console a fixed IP on your router) and the node also shows **Console state** (`On` / `Rest` / `Off`) and **Console power**, asked over the local network ([details](esphome/README.md#console-state)). Set **Remote Play IPs** to the devices you play from (an Apple TV with Asobi, a phone with PS Remote Play; IPs or ranges) and the ESP32 wakes the console as soon as you open Remote Play there ([details](esphome/README.md#remote-play-request)).
 
 No integration to install. The rest of this page covers the optional integration.
 

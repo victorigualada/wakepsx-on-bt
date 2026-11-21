@@ -16,9 +16,10 @@ substitutions:
   # Optional: the console's IP for the Console state sensors. You can also set
   # it later from the device page (Console IP).
   # console_ip: "192.168.1.105"
-  # Optional: the device you play Remote Play from, to wake the console when
-  # you open it there. You can also set it later (Remote Play IP).
-  # remote_play_ip: "192.168.1.102"
+  # Optional: the devices you play Remote Play from (IPs and ranges, separated
+  # by commas), to wake the console when you open it there. You can also set
+  # them later (Remote Play IPs).
+  # remote_play_ip: "192.168.1.102, 192.168.1.200-210"
 
 esphome:
   name: ${name}
